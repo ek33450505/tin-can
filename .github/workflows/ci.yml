@@ -1,0 +1,64 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: ShellCheck
+        run: shellcheck --shell=bash bin/tin-can install.sh
+
+  bats-ubuntu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install bats and zsh
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bats zsh
+          command -v zsh >/dev/null || { echo "zsh missing: roundtrip test would skip" >&2; exit 1; }
+          bats --version
+      - name: Run tests
+        run: bats tests/
+
+  # macOS minutes bill at 10x on a private repo: run on main and on demand only during the
+  # private test period. Move back onto pull_request when the repo is public.
+  bats-macos:
+    if: github.event_name != 'pull_request'
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install bats
+        run: brew install bats-core
+      - name: Assert system bash is 3.x and zsh exists
+        run: |
+          /bin/bash --version | head -1
+          v="$(/bin/bash -c 'echo "${BASH_VERSINFO[0]}"')"
+          [ "$v" = "3" ] || { echo "expected /bin/bash 3.x, got $v" >&2; exit 1; }
+          command -v zsh >/dev/null || { echo "zsh missing" >&2; exit 1; }
+      - name: Run tests under the system bash 3.2
+        env:
+          TIN_CAN_TEST_BASH: /bin/bash
+        run: bats tests/

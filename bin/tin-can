@@ -1,0 +1,467 @@
+#!/usr/bin/env bash
+# tin-can - hand an AI coding session off to a FRESH session in a new terminal
+# tab/window: open the tab, start the agent CLI there, and give it one initial
+# prompt telling it to read a handoff file.
+#
+# Usage: tin-can [options] [HANDOFF_FILE]      (see --help)
+#
+# Exit codes: 0 ok, 1 launch failure, 2 usage/handoff error.
+# Portable to bash 3.2 (macOS /bin/bash): no mapfile, no ${x,,}, no
+# associative arrays, no &>>.
+
+set -euo pipefail
+# A set CDPATH makes `cd` print the resolved directory to stdout, which would
+# corrupt every $(cd ... && pwd) capture below.
+unset CDPATH
+
+PROG="tin-can"
+# Single source for validation and --help. To add an agent: add its name here
+# (and a case branch in agent_binary only if its binary name differs).
+SUPPORTED_AGENTS="claude codex"
+SUPPORTED_TERMS="cmux tmux print auto"
+
+die() {
+  local code="$1"
+  shift
+  printf '%s: %s\n' "$PROG" "$*" >&2
+  exit "$code"
+}
+
+warn() {
+  printf '%s: WARNING: %s\n' "$PROG" "$*" >&2
+}
+
+# shown STRING -> a terminal-safe rendering for error messages. LC_ALL=C makes
+# %q escape every non-ASCII byte as \NNN (bash 3.2 would otherwise echo raw
+# C1/bidi bytes under a UTF-8 locale).
+shown() {
+  local LC_ALL=C
+  printf '%q' "$1"
+}
+
+in_list() { # in_list WORD "a b c"
+  local w
+  for w in $2; do
+    if [ "$w" = "$1" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+usage() {
+  local agents terms
+  agents="${SUPPORTED_AGENTS// / | }"
+  terms="${SUPPORTED_TERMS// / | }"
+  cat <<EOF
+Usage: tin-can [options] [HANDOFF_FILE]
+
+Open a fresh AI coding session in a new terminal tab/window and tell it to
+read a handoff file. The only thing passed to the agent is one prompt naming
+the file's absolute path; file contents are never put on a command line.
+
+Options:
+  --agent NAME     $agents
+                                           (default: \$TIN_CAN_AGENT or claude)
+  --term NAME      $terms
+                                           (default: \$TIN_CAN_TERM or auto)
+  --where tab|window                       (default: tab)
+  --cwd DIR        start the agent in DIR  (default: current directory)
+  --dir DIR        handoff search directory
+                   (default: \$TIN_CAN_DIR or ~/.claude/resume-prompts)
+  --dry-run        show what would run; launch nothing
+  --version        print version
+  -h, --help       print this help
+
+HANDOFF_FILE: an existing readable file. If omitted, the newest *.md in the
+search directory is used (names starting with "superseded-" or "_" are
+skipped; files whose name contains the --cwd directory's name as a whole
+word are preferred). Auto-selection refuses a search directory that is
+group/world-writable or not owned by you, and skips symlinks and files not
+owned by you. Whoever can write there steers the next session: review the
+chosen file (use --dry-run) before launching. Files with equal modification
+times are taken in file-name order.
+
+--term auto picks cmux if \$CMUX_WORKSPACE_ID is set and cmux is on PATH, else
+tmux if \$TMUX is set and tmux is on PATH, else print (the launch command is
+printed so you can paste it into a new tab).
+
+Paths containing ASCII control characters (tab, newline, ESC, DEL), C1 controls
+(U+0080-U+009F), line/paragraph separators (U+2028-U+2029), bidi embeddings and
+overrides (U+202A-U+202E) or bidi isolates (U+2066-U+2069) are refused (exit 2)
+for --cwd, --dir and an explicit HANDOFF_FILE; auto-selection skips such files.
+
+Exit codes: 0 ok, 1 launch failure, 2 usage or handoff error.
+EOF
+}
+
+# Directory holding this script, with symlinks resolved (BSD has no readlink -f).
+self_dir() {
+  local src="${BASH_SOURCE[0]}" dir link
+  while [ -L "$src" ]; do
+    dir="$(cd -P "$(dirname "$src")" && pwd -P)"
+    link="$(readlink "$src")"
+    case "$link" in
+      /*) src="$link" ;;
+      *) src="$dir/$link" ;;
+    esac
+  done
+  cd -P "$(dirname "$src")" && pwd -P
+}
+
+read_version() {
+  local vfile v=""
+  vfile="$(self_dir)/../VERSION"
+  if [ -r "$vfile" ]; then
+    IFS= read -r v <"$vfile" || true
+  fi
+  printf '%s\n' "${v:-unknown}"
+}
+
+# Agent adapter: the binary to exec for a (validated) agent name. The prompt
+# is passed as its single argument. Add a case branch only when the binary
+# name differs from the agent name or extra fixed arguments are needed.
+agent_binary() {
+  case "$1" in
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+detect_term() {
+  if [ -n "${CMUX_WORKSPACE_ID:-}" ] && command -v cmux >/dev/null 2>&1; then
+    printf 'cmux'
+  elif [ -n "${TMUX:-}" ] && command -v tmux >/dev/null 2>&1; then
+    printf 'tmux'
+  else
+    printf 'print'
+  fi
+}
+
+# has_ctrl STRING: true if it contains a character that could disguise or
+# inject terminal/shell text. Matched byte-wise under LC_ALL=C:
+#   ASCII controls 0x01-0x1F and 0x7F;
+#   C1 controls U+0080-U+009F (UTF-8 C2 80..C2 9F);
+#   line/paragraph separators and bidi embeddings/overrides U+2028-U+202E
+#     (E2 80 A8..AE);
+#   bidi isolates U+2066-U+2069 (E2 81 A6..A9).
+# Plain non-ASCII text (accents, CJK, emoji) is not matched.
+has_ctrl() {
+  local LC_ALL=C
+  case "$1" in
+    *[[:cntrl:]]*) return 0 ;;
+    *$'\xc2'[$'\x80'-$'\x9f']*) return 0 ;;
+    *$'\xe2\x80'[$'\xa8'-$'\xae']*) return 0 ;;
+    *$'\xe2\x81'[$'\xa6'-$'\xa9']*) return 0 ;;
+  esac
+  return 1
+}
+
+# sq STRING -> POSIX single-quoted form, valid in sh/dash/bash/zsh.
+# (printf %q emits $'...' for some inputs, which dash does not understand.)
+sq() {
+  local s="$1" q="'" bs="\\" out
+  out=${s//$q/$q$bs$q$q}
+  printf "'%s'" "$out"
+}
+
+# canon_dir DIR -> sets CANON to the physical absolute path. Uses a sentinel so
+# a trailing newline in the path is not silently stripped.
+canon_dir() {
+  local out
+  out="$(cd -P -- "$1" 2>/dev/null && pwd -P && printf x)" || return 1
+  out="${out%x}"
+  CANON="${out%$'\n'}"
+}
+
+# find_handoff DIR REPO -> sets FOUND, or FIND_ERR and returns 1.
+find_handoff() {
+  local dir="$1" repo="$2" cdir wr f name norm nrepo
+  local best="" pref="" skipped=0
+  FOUND=""
+  FIND_ERR=""
+  if [ ! -d "$dir" ]; then
+    FIND_ERR="handoff search dir not found: $dir (pass HANDOFF_FILE or use --dir)"
+    return 1
+  fi
+  if ! canon_dir "$dir"; then
+    FIND_ERR="cannot enter handoff search dir: $dir"
+    return 1
+  fi
+  cdir="$CANON"
+  if has_ctrl "$cdir"; then
+    FIND_ERR="handoff search dir contains a control character: $(shown "$cdir")"
+    return 1
+  fi
+  if [ ! -O "$cdir" ]; then
+    FIND_ERR="refusing to auto-select from $cdir: not owned by you (an explicit HANDOFF_FILE is still allowed)"
+    return 1
+  fi
+  wr="$(find "$cdir" -maxdepth 0 \( -perm -0020 -o -perm -0002 \) -print 2>/dev/null || true)"
+  if [ -n "$wr" ]; then
+    FIND_ERR="refusing to auto-select from $cdir: it is group- or world-writable (an explicit HANDOFF_FILE is still allowed)"
+    return 1
+  fi
+
+  nrepo="${repo//_/-}"
+  nrepo="${nrepo//./-}"
+  for f in "$cdir"/*.md; do
+    if [ ! -e "$f" ] && [ ! -L "$f" ]; then
+      continue # unmatched glob
+    fi
+    name="${f##*/}"
+    case "$name" in
+      superseded-* | _*) continue ;;
+    esac
+    if has_ctrl "$name" || [ -L "$f" ]; then
+      skipped=$((skipped + 1))
+      continue
+    fi
+    if [ ! -f "$f" ] || [ ! -r "$f" ]; then
+      continue # directory, device, unreadable
+    fi
+    if [ ! -O "$f" ]; then
+      skipped=$((skipped + 1))
+      continue
+    fi
+    if [ -z "$best" ] || [ "$f" -nt "$best" ]; then
+      best="$f"
+    fi
+    if [ -n "$nrepo" ]; then
+      norm="${name%.md}"
+      norm="${norm//_/-}"
+      norm="${norm//./-}"
+      case "-$norm-" in
+        *"-$nrepo-"*)
+          if [ -z "$pref" ] || [ "$f" -nt "$pref" ]; then
+            pref="$f"
+          fi
+          ;;
+      esac
+    fi
+  done
+  if [ -n "$pref" ]; then
+    FOUND="$pref"
+  elif [ -n "$best" ]; then
+    FOUND="$best"
+  else
+    FIND_ERR="no handoff file found in $cdir (pass HANDOFF_FILE or use --dir)"
+    if [ "$skipped" -gt 0 ]; then
+      FIND_ERR="$FIND_ERR; $skipped candidate(s) skipped: symlink, not owned by you, or unsafe name"
+    fi
+    return 1
+  fi
+}
+
+print_fallback() { # print_fallback CMD
+  printf '%s: paste this into a new terminal tab to start the fresh session:\n' "$PROG" >&2
+  printf '%s\n' "$1"
+}
+
+main() {
+  local agent="${TIN_CAN_AGENT:-claude}"
+  local term="${TIN_CAN_TERM:-auto}"
+  local where="tab" where_given=0 cwd="" dry_run=0
+  local search_dir="${TIN_CAN_DIR:-${HOME:-}/.claude/resume-prompts}"
+  local handoff_arg="" have_handoff=0
+  local agent_bin repo handoff hd hbase prompt cmd session="" rc err a opt
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      --version)
+        printf '%s %s\n' "$PROG" "$(read_version)"
+        exit 0
+        ;;
+      --agent | --term | --where | --cwd | --dir)
+        opt="$1"
+        [ $# -ge 2 ] || die 2 "option $opt requires a value (see --help)"
+        [ -n "$2" ] || die 2 "option $opt requires a non-empty value"
+        case "$2" in
+          -*) die 2 "option $opt requires a value, got $(shown "$2") (prefix a relative path with ./)" ;;
+        esac
+        case "$opt" in
+          --agent) agent="$2" ;;
+          --term) term="$2" ;;
+          --where)
+            where="$2"
+            where_given=1
+            ;;
+          --cwd) cwd="$2" ;;
+          --dir) search_dir="$2" ;;
+        esac
+        shift 2
+        ;;
+      --dry-run)
+        dry_run=1
+        shift
+        ;;
+      --)
+        shift
+        break
+        ;;
+      -*) die 2 "unknown option: $(shown "$1") (see --help; use -- before a file name starting with -)" ;;
+      *)
+        [ "$have_handoff" -eq 0 ] ||
+          die 2 "unexpected extra argument $(shown "$1"): only one HANDOFF_FILE is accepted"
+        handoff_arg="$1"
+        have_handoff=1
+        shift
+        ;;
+    esac
+  done
+  while [ $# -gt 0 ]; do
+    [ "$have_handoff" -eq 0 ] ||
+      die 2 "unexpected extra argument $(shown "$1"): only one HANDOFF_FILE is accepted"
+    handoff_arg="$1"
+    have_handoff=1
+    shift
+  done
+
+  in_list "$agent" "$SUPPORTED_AGENTS" ||
+    die 2 "unknown agent $(shown "$agent") (supported: $SUPPORTED_AGENTS)"
+  agent_bin="$(agent_binary "$agent")"
+
+  in_list "$term" "$SUPPORTED_TERMS" ||
+    die 2 "unknown terminal $(shown "$term") (supported: $SUPPORTED_TERMS)"
+  if [ "$term" = "auto" ]; then
+    term="$(detect_term)"
+  fi
+
+  case "$where" in
+    tab | window) ;;
+    *) die 2 "--where must be 'tab' or 'window' (got $(shown "$where"))" ;;
+  esac
+  if [ "$term" = "print" ] && [ "$where_given" -eq 1 ]; then
+    warn "--where is ignored with --term print"
+  fi
+
+  [ -n "$cwd" ] || cwd="$PWD"
+  if has_ctrl "$cwd"; then
+    die 2 "cwd contains a control character; refusing: $(shown "$cwd")"
+  fi
+  [ -d "$cwd" ] || die 2 "--cwd is not a directory: $cwd"
+  canon_dir "$cwd" || die 2 "cannot enter --cwd directory: $cwd"
+  cwd="$CANON"
+  if has_ctrl "$cwd"; then
+    die 2 "cwd contains a control character; refusing: $(shown "$cwd")"
+  fi
+  repo="${cwd##*/}"
+
+  if has_ctrl "$search_dir"; then
+    die 2 "handoff search dir contains a control character; refusing: $(shown "$search_dir")"
+  fi
+
+  if [ "$have_handoff" -eq 1 ]; then
+    if has_ctrl "$handoff_arg"; then
+      die 2 "handoff path contains a control character; refusing: $(shown "$handoff_arg")"
+    fi
+    [ -f "$handoff_arg" ] || die 2 "handoff is not an existing regular file: $handoff_arg"
+    [ -r "$handoff_arg" ] || die 2 "handoff file is not readable: $handoff_arg"
+    case "$handoff_arg" in
+      */*)
+        hd="${handoff_arg%/*}"
+        [ -n "$hd" ] || hd="/"
+        ;;
+      *) hd="." ;;
+    esac
+    hbase="${handoff_arg##*/}"
+    canon_dir "$hd" || die 2 "cannot resolve handoff directory: $hd"
+    hd="$CANON"
+    handoff="${CANON%/}/$hbase"
+    if has_ctrl "$handoff"; then
+      die 2 "handoff path contains a control character; refusing: $(shown "$handoff")"
+    fi
+    [ -f "$handoff" ] || die 2 "cannot canonicalise handoff path: $handoff_arg"
+    if [ -L "$handoff" ]; then
+      warn "handoff file is a symlink: $handoff"
+    fi
+    if [ ! -O "$handoff" ]; then
+      warn "handoff file is not owned by you: $handoff"
+    fi
+    err="$(find "$hd" -maxdepth 0 \( -perm -0020 -o -perm -0002 \) -print 2>/dev/null || true)"
+    if [ -n "$err" ]; then
+      warn "handoff file is in a group- or world-writable directory: $hd"
+    fi
+  else
+    find_handoff "$search_dir" "$repo" || die 2 "$FIND_ERR"
+    handoff="$FOUND"
+    printf '%s: using %s\n' "$PROG" "$handoff" >&2
+  fi
+
+  prompt="Read the handoff file at $handoff and follow its KICKOFF section."
+  cmd="cd $(sq "$cwd") && exec $(sq "$agent_bin") $(sq "$prompt")"
+
+  # Build the terminal launch argv in the positional parameters.
+  case "$term" in
+    cmux)
+      if [ "$where" = "tab" ]; then
+        set -- cmux new-surface --type terminal --command "$cmd" --focus true
+      else
+        set -- cmux new-workspace --name "$repo (tin-can)" --cwd "$cwd" --command "$cmd" --focus true
+      fi
+      ;;
+    tmux)
+      # No -c: the command already cds, and tmux may format-expand -c.
+      if [ "$where" = "tab" ]; then
+        set -- tmux new-window "$cmd"
+      else
+        session="tin-can-$$"
+        set -- tmux new-session -d -s "$session" "$cmd"
+      fi
+      ;;
+    print)
+      set --
+      ;;
+  esac
+
+  if [ "$dry_run" -eq 1 ]; then
+    printf 'tin-can dry-run (nothing launched)\n'
+    printf '  agent:   %s\n' "$agent"
+    printf '  term:    %s (%s)\n' "$term" "$where"
+    printf '  cwd:     %s\n' "$cwd"
+    printf '  handoff: %s\n' "$handoff"
+    if [ "$term" = "print" ]; then
+      printf '  launch:  (print only)\n'
+    else
+      printf '  launch: '
+      for a in "$@"; do
+        if [ "$a" = "$cmd" ]; then
+          printf ' <command>'
+        else
+          printf ' %q' "$a"
+        fi
+      done
+      printf '\n'
+    fi
+    printf '  command: %s\n' "$cmd"
+    exit 0
+  fi
+
+  if [ "$term" = "print" ]; then
+    print_fallback "$cmd"
+    exit 0
+  fi
+
+  rc=0
+  err="$("$@" 2>&1)" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf '%s: %s failed (exit %s)\n' "$PROG" "$term" "$rc" >&2
+    if [ -n "$err" ]; then
+      printf '%s\n' "$err" >&2
+    fi
+    print_fallback "$cmd"
+    exit 1
+  fi
+  if [ "$term" = "tmux" ] && [ "$where" = "window" ]; then
+    printf '%s: launched %s in a new DETACHED tmux session; attach with: tmux attach -t %s\n' "$PROG" "$agent" "$session" >&2
+  elif [ "$term" = "tmux" ]; then
+    printf '%s: launched %s in a new tmux window (tab)\n' "$PROG" "$agent" >&2
+  else
+    printf '%s: launched %s in a new %s %s\n' "$PROG" "$agent" "$term" "$where" >&2
+  fi
+}
+
+main "$@"
