@@ -47,10 +47,10 @@ The handoff file is an ordinary markdown file with a `## KICKOFF` section; see [
 
 | | Status |
 |---|---|
-| Terminal: cmux (tab = new surface, window = new workspace) | Pending live verification (stub-tested) |
+| Terminal: cmux (tab = new surface, window = new workspace) | Tab verified live (cmux 0.65.0, 2026-10-13); window stub-tested |
 | Terminal: tmux (tab = new window; window = a new detached session, `tmux attach -t NAME` printed) | Tested with stubs only |
 | Terminal: print (any terminal; copy the command) | Tested; no terminal involved |
-| Agent: Claude Code (`claude`) | Pending live verification (stub-tested) |
+| Agent: Claude Code (`claude`) | Verified live (Claude Code 2.1.296, 2026-10-13) |
 | Agent: Codex (`codex`) | Tested with stubs only |
 
 Adding an agent is one name in `SUPPORTED_AGENTS` (plus a `case` branch in `agent_binary` if its binary name differs); adding a terminal is one branch where the launch command is built. `--term auto` picks cmux when `$CMUX_WORKSPACE_ID` is set and `cmux` is on `PATH`, then tmux when `$TMUX` is set and `tmux` is on `PATH`, else print.
