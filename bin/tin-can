@@ -187,11 +187,11 @@ find_handoff() {
   FOUND=""
   FIND_ERR=""
   if [ ! -d "$dir" ]; then
-    FIND_ERR="handoff search dir not found: $dir (pass HANDOFF_FILE or use --dir)"
+    FIND_ERR="handoff search dir not found: $(shown "$dir") (pass HANDOFF_FILE or use --dir)"
     return 1
   fi
   if ! canon_dir "$dir"; then
-    FIND_ERR="cannot enter handoff search dir: $dir"
+    FIND_ERR="cannot enter handoff search dir: $(shown "$dir")"
     return 1
   fi
   cdir="$CANON"
@@ -200,12 +200,12 @@ find_handoff() {
     return 1
   fi
   if [ ! -O "$cdir" ]; then
-    FIND_ERR="refusing to auto-select from $cdir: not owned by you (an explicit HANDOFF_FILE is still allowed)"
+    FIND_ERR="refusing to auto-select from $(shown "$cdir"): not owned by you (an explicit HANDOFF_FILE is still allowed)"
     return 1
   fi
   wr="$(find "$cdir" -maxdepth 0 \( -perm -0020 -o -perm -0002 \) -print 2>/dev/null || true)"
   if [ -n "$wr" ]; then
-    FIND_ERR="refusing to auto-select from $cdir: it is group- or world-writable (an explicit HANDOFF_FILE is still allowed)"
+    FIND_ERR="refusing to auto-select from $(shown "$cdir"): it is group- or world-writable (an explicit HANDOFF_FILE is still allowed)"
     return 1
   fi
 
@@ -251,7 +251,7 @@ find_handoff() {
   elif [ -n "$best" ]; then
     FOUND="$best"
   else
-    FIND_ERR="no handoff file found in $cdir (pass HANDOFF_FILE or use --dir)"
+    FIND_ERR="no handoff file found in $(shown "$cdir") (pass HANDOFF_FILE or use --dir)"
     if [ "$skipped" -gt 0 ]; then
       FIND_ERR="$FIND_ERR; $skipped candidate(s) skipped: symlink, not owned by you, or unsafe name"
     fi
@@ -353,8 +353,8 @@ main() {
   if has_ctrl "$cwd"; then
     die 2 "cwd contains a control character; refusing: $(shown "$cwd")"
   fi
-  [ -d "$cwd" ] || die 2 "--cwd is not a directory: $cwd"
-  canon_dir "$cwd" || die 2 "cannot enter --cwd directory: $cwd"
+  [ -d "$cwd" ] || die 2 "--cwd is not a directory: $(shown "$cwd")"
+  canon_dir "$cwd" || die 2 "cannot enter --cwd directory: $(shown "$cwd")"
   cwd="$CANON"
   if has_ctrl "$cwd"; then
     die 2 "cwd contains a control character; refusing: $(shown "$cwd")"
@@ -376,8 +376,8 @@ main() {
     if has_ctrl "$handoff_arg"; then
       die 2 "handoff path contains a control character; refusing: $(shown "$handoff_arg")"
     fi
-    [ -f "$handoff_arg" ] || die 2 "handoff is not an existing regular file: $handoff_arg"
-    [ -r "$handoff_arg" ] || die 2 "handoff file is not readable: $handoff_arg"
+    [ -f "$handoff_arg" ] || die 2 "handoff is not an existing regular file: $(shown "$handoff_arg")"
+    [ -r "$handoff_arg" ] || die 2 "handoff file is not readable: $(shown "$handoff_arg")"
     case "$handoff_arg" in
       */*)
         hd="${handoff_arg%/*}"
@@ -386,27 +386,27 @@ main() {
       *) hd="." ;;
     esac
     hbase="${handoff_arg##*/}"
-    canon_dir "$hd" || die 2 "cannot resolve handoff directory: $hd"
+    canon_dir "$hd" || die 2 "cannot resolve handoff directory: $(shown "$hd")"
     hd="$CANON"
     handoff="${CANON%/}/$hbase"
     if has_ctrl "$handoff"; then
       die 2 "handoff path contains a control character; refusing: $(shown "$handoff")"
     fi
-    [ -f "$handoff" ] || die 2 "cannot canonicalise handoff path: $handoff_arg"
+    [ -f "$handoff" ] || die 2 "cannot canonicalise handoff path: $(shown "$handoff_arg")"
     if [ -L "$handoff" ]; then
-      warn "handoff file is a symlink: $handoff"
+      warn "handoff file is a symlink: $(shown "$handoff")"
     fi
     if [ ! -O "$handoff" ]; then
-      warn "handoff file is not owned by you: $handoff"
+      warn "handoff file is not owned by you: $(shown "$handoff")"
     fi
     err="$(find "$hd" -maxdepth 0 \( -perm -0020 -o -perm -0002 \) -print 2>/dev/null || true)"
     if [ -n "$err" ]; then
-      warn "handoff file is in a group- or world-writable directory: $hd"
+      warn "handoff file is in a group- or world-writable directory: $(shown "$hd")"
     fi
   else
     find_handoff "$search_dir" "$repo" || die 2 "$FIND_ERR"
     handoff="$FOUND"
-    printf '%s: using %s\n' "$PROG" "$handoff" >&2
+    printf '%s: using %s\n' "$PROG" "$(shown "$handoff")" >&2
   fi
 
   prompt="Read the handoff file at $handoff and follow its KICKOFF section."

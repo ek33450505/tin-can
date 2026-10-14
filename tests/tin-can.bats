@@ -1001,3 +1001,128 @@ find_dash() {
     [[ "$output" == *'\302\233'* || "$output" == *'\342\200\256'* ]]
   done
 }
+
+# ZWSP (U+200B) is not refused by has_ctrl, so it reaches the path error and
+# warning messages, which must show it escaped via shown(), never raw.
+@test "path in error: --cwd not a directory shows ZWSP escaped (UTF-8 locale)" {
+  local z; z="$(printf '\342\200\213')"
+  run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print --cwd "$TEST_ROOT/no-such/a${z}b" "$HF"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--cwd is not a directory"* ]]
+  [[ "$output" != *"$z"* ]]
+  [[ "$output" == *'\342\200\213'* ]]
+  [ "$(total_calls)" -eq 0 ]
+}
+
+@test "path in error: handoff not a regular file shows ZWSP escaped (UTF-8 locale)" {
+  local z; z="$(printf '\342\200\213')"
+  run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print "$TEST_ROOT/no-such/h${z}.md"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"handoff is not an existing regular file"* ]]
+  [[ "$output" != *"$z"* ]]
+  [[ "$output" == *'\342\200\213'* ]]
+  [ "$(total_calls)" -eq 0 ]
+}
+
+@test "path in error: --dir not found shows ZWSP escaped (UTF-8 locale)" {
+  local z; z="$(printf '\342\200\213')"
+  run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print --latest --dir "$TEST_ROOT/no-such/d${z}"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"handoff search dir not found"* ]]
+  [[ "$output" != *"$z"* ]]
+  [[ "$output" == *'\342\200\213'* ]]
+  [ "$(total_calls)" -eq 0 ]
+}
+
+@test "path in warning: symlink handoff warning shows ZWSP escaped (UTF-8 locale)" {
+  local z line found=0; z="$(printf '\342\200\213')"
+  mkdir -p "$TEST_ROOT/zw"
+  chmod 700 "$TEST_ROOT/zw"
+  ln -s "$HF" "$TEST_ROOT/zw/s${z}.md"
+  run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print "$TEST_ROOT/zw/s${z}.md"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"handoff file is a symlink"* ]]
+  while IFS= read -r line; do
+    if [[ "$line" == *"handoff file is a symlink:"* ]]; then
+      found=1
+      [[ "$line" != *"$z"* ]]
+      [[ "$line" == *'\342\200\213'* ]]
+    fi
+  done <<< "$output"
+  [ "$found" -eq 1 ]
+}
+
+@test "path in warning: world-writable handoff dir warning shows ZWSP escaped (UTF-8 locale)" {
+  local z line found=0; z="$(printf '\342\200\213')"
+  mkdir -p "$TEST_ROOT/ww${z}d"
+  printf 'x\n' >"$TEST_ROOT/ww${z}d/ok.md"
+  chmod 777 "$TEST_ROOT/ww${z}d"
+  run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print "$TEST_ROOT/ww${z}d/ok.md"
+  [ "$status" -eq 0 ]
+  while IFS= read -r line; do
+    if [[ "$line" == *"group- or world-writable directory"* ]]; then
+      found=1
+      [[ "$line" != *"$z"* ]]
+      [[ "$line" == *'\342\200\213'* ]]
+    fi
+  done <<< "$output"
+  [ "$found" -eq 1 ]
+}
+
+@test "path in error: no handoff file found shows ZWSP escaped (UTF-8 locale)" {
+  local z; z="$(printf '\342\200\213')"
+  mkdir -p "$TEST_ROOT/e${z}d"
+  chmod 755 "$TEST_ROOT/e${z}d"
+  run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print --latest --dir "$TEST_ROOT/e${z}d"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"no handoff file found in"* ]]
+  [[ "$output" != *"$z"* ]]
+  [[ "$output" == *'\342\200\213'* ]]
+  [ "$(total_calls)" -eq 0 ]
+}
+
+@test "path in error: unreadable handoff shows ZWSP escaped (UTF-8 locale)" {
+  if [ "$(id -u)" -eq 0 ]; then skip "root can read anything"; fi
+  local z; z="$(printf '\342\200\213')"
+  printf 'x\n' >"$TEST_ROOT/h${z}.md"
+  chmod 000 "$TEST_ROOT/h${z}.md"
+  run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print "$TEST_ROOT/h${z}.md"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"not readable"* ]]
+  [[ "$output" != *"$z"* ]]
+  [[ "$output" == *'\342\200\213'* ]]
+  [ "$(total_calls)" -eq 0 ]
+}
+
+@test "path in report: auto-select 'using' line shows ZWSP escaped (UTF-8 locale)" {
+  local z line found=0; z="$(printf '\342\200\213')"
+  printf 'x\n' >"$RESUME/n${z}.md"
+  run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print --latest
+  [ "$status" -eq 0 ]
+  while IFS= read -r line; do
+    if [[ "$line" == "tin-can: using "* ]]; then
+      found=1
+      [[ "$line" != *"$z"* ]]
+      [[ "$line" == *'\342\200\213'* ]]
+    fi
+  done <<< "$output"
+  [ "$found" -eq 1 ]
+}
+
+# raw_path_sites FILE: lines where die 2 / warn / FIND_ERR= still print a path
+# variable raw. $(shown "...") wrappers are stripped first, so a line that
+# escapes one path cannot hide a second, raw one.
+raw_path_sites() {
+  sed -E 's/\$\(shown "[^"]*"\)//g' "$1" |
+    grep -nE '(die 2|warn|FIND_ERR=).*\$(cwd|dir|cdir|hd|handoff|handoff_arg)\b'
+}
+
+@test "static guard: no die 2 / warn / FIND_ERR line interpolates a path variable raw" {
+  [ -r "$TC" ]
+  run raw_path_sites "$TC"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  run grep -c 'using %s.*"\$(shown "\$handoff")"' "$TC"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
+}
