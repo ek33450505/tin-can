@@ -69,7 +69,7 @@ The command run in the new terminal is `cd 'DIR' && exec 'AGENT' 'PROMPT'`, buil
 
 - The directory check uses POSIX permission bits and ownership only. It does not see macOS ACLs (an `ls -ld` entry ending in `+`) or other extended access controls.
 - Newest means newest modification time; files with equal times are taken in file-name order.
-- Processes running as your own user, including a compromised agent, can still plant a file you own in the handoff directory. Ownership checks do not help there: review the file with `--dry-run` before launching.
+- Processes running as your own user, including a compromised agent, can still plant a file you own in the handoff directory. Ownership checks do not help there: review the file with `--latest --dry-run` before launching.
 - The "not owned by you" paths are not covered by tests (see Development).
 
 ## Development
@@ -92,6 +92,11 @@ Other tools approach the same problem, mostly aimed at Claude Code and tmux:
 - [fuzzyfox/skills](https://github.com/fuzzyfox/skills) (`spawn`)
 
 `tin-can` aims to be agent- and terminal-agnostic, at the cost of doing less: it does not write the handoff for you and it does not parse it.
+
+## Changes
+
+- **0.1.1**: **breaking:** auto-selecting the newest handoff now needs `--latest`. A bare `tin-can`, or `tin-can --dry-run` without a file, exits 2 instead of guessing, and giving both a file and `--latest` also exits 2. The left-to-right, right-to-left and Arabic letter marks (U+200E, U+200F, U+061C) are refused in paths like the other bidi controls. Paths in tin-can's own error and warning messages, and in the `using` line, are shown shell-escaped (`printf %q`).
+- **0.1.0**: first version.
 
 ## License
 
