@@ -610,6 +610,16 @@ load helpers
   [[ "$output" == *"candidate(s) skipped"* ]]
 }
 
+@test "trust: a candidate whose name has an RLM mark is skipped even when newest" {
+  printf 'old\n' >"$RESUME/older.md"
+  printf 'x\n' >"$RESUME/$(printf 'new\342\200\217x').md"
+  set_mtime "$RESUME/older.md" 202601010000
+  set_mtime "$RESUME/$(printf 'new\342\200\217x').md" 202601050000
+  run_tc --latest --cwd "$TEST_ROOT" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"tin-can: using $RESUME/older.md"* ]]
+}
+
 @test "trust: an explicit symlink handoff is allowed but warns" {
   ln -s "$HF" "$TEST_ROOT/link.md"
   run_tc --cwd "$WORK" --term print "$TEST_ROOT/link.md"
@@ -821,6 +831,13 @@ find_dash() {
   [[ "$output" == *"control character"* ]]
 }
 
+@test "control chars: an LRM mark in --dir is refused" {
+  mkdir -p "$TEST_ROOT/ctld/$(printf 'a\342\200\216b')"
+  run_tc --term print --latest --cwd "$WORK" --dir "$TEST_ROOT/ctld/$(printf 'a\342\200\216b')"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"control character"* ]]
+}
+
 @test "control chars: a symlinked --cwd whose real path has a control character is refused" {
   mkdir -p "$TEST_ROOT/real$(printf '\t')dir"
   ln -s "$TEST_ROOT/real$(printf '\t')dir" "$TEST_ROOT/clean-link"
@@ -916,7 +933,8 @@ find_dash() {
   local n
   for n in "$(printf 'a\302\233b')" "$(printf 'a\302\200b')" "$(printf 'a\302\237b')" \
     "$(printf 'a\342\200\256b')" "$(printf 'a\342\200\252b')" "$(printf 'a\342\200\250b')" \
-    "$(printf 'a\342\200\251b')" "$(printf 'a\342\201\246b')" "$(printf 'a\342\201\251b')"; do
+    "$(printf 'a\342\200\251b')" "$(printf 'a\342\201\246b')" "$(printf 'a\342\201\251b')" \
+    "$(printf 'a\342\200\216b')" "$(printf 'a\342\200\217b')" "$(printf 'a\330\234b')"; do
     mkdir -p "$TEST_ROOT/uc/$n"
     run_tc --term print --cwd "$TEST_ROOT/uc/$n" "$HF"
     [ "$status" -eq 2 ]
@@ -925,10 +943,11 @@ find_dash() {
   done
 }
 
-@test "unicode controls: U+009B and U+202E in the handoff path are refused" {
+@test "unicode controls: C1, bidi and mark characters in the handoff path are refused" {
   local n
   mkdir -p "$TEST_ROOT/uch"
-  for n in "$(printf 'a\302\233b.md')" "$(printf 'a\342\200\256b.md')"; do
+  for n in "$(printf 'a\302\233b.md')" "$(printf 'a\342\200\256b.md')" \
+    "$(printf 'a\342\200\216b.md')" "$(printf 'a\330\234b.md')"; do
     printf 'x\n' >"$TEST_ROOT/uch/$n"
     run_tc --term print --cwd "$WORK" "$TEST_ROOT/uch/$n"
     [ "$status" -eq 2 ]
@@ -950,7 +969,9 @@ find_dash() {
   local n
   for n in "$(printf '\342\200\247')" "$(printf '\342\200\257')" \
     "$(printf '\342\201\245')" "$(printf '\342\201\252')" \
-    "$(printf '\302\240')" "$(printf '\303\201')"; do
+    "$(printf '\302\240')" "$(printf '\303\201')" \
+    "$(printf '\342\200\215')" "$(printf '\342\200\220')" \
+    "$(printf '\330\233')" "$(printf '\330\235')"; do
     run_tc --term print --cwd "$TEST_ROOT/no-such/a${n}b" "$HF"
     [ "$status" -eq 2 ]
     [[ "$output" == *"--cwd is not a directory"* ]]
@@ -962,7 +983,8 @@ find_dash() {
   local n
   for n in "$(printf '\302\200')" "$(printf '\302\237')" \
     "$(printf '\342\200\250')" "$(printf '\342\200\256')" \
-    "$(printf '\342\201\246')" "$(printf '\342\201\251')"; do
+    "$(printf '\342\201\246')" "$(printf '\342\201\251')" \
+    "$(printf '\342\200\216')" "$(printf '\342\200\217')" "$(printf '\330\234')"; do
     run_tc --term print --cwd "$TEST_ROOT/no-such/a${n}b" "$HF"
     [ "$status" -eq 2 ]
     [[ "$output" == *"control character"* ]]

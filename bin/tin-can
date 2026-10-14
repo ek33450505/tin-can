@@ -90,8 +90,9 @@ printed so you can paste it into a new tab).
 
 Paths containing ASCII control characters (tab, newline, ESC, DEL), C1 controls
 (U+0080-U+009F), line/paragraph separators (U+2028-U+2029), bidi embeddings and
-overrides (U+202A-U+202E) or bidi isolates (U+2066-U+2069) are refused (exit 2)
-for --cwd, --dir and an explicit HANDOFF_FILE; --latest skips such files.
+overrides (U+202A-U+202E), bidi isolates (U+2066-U+2069) or bidi marks (U+200E,
+U+200F, U+061C) are refused (exit 2) for --cwd, --dir and an explicit
+HANDOFF_FILE; --latest skips such files.
 
 Exit codes: 0 ok, 1 launch failure, 2 usage or handoff error.
 EOF
@@ -145,7 +146,9 @@ detect_term() {
 #   C1 controls U+0080-U+009F (UTF-8 C2 80..C2 9F);
 #   line/paragraph separators and bidi embeddings/overrides U+2028-U+202E
 #     (E2 80 A8..AE);
-#   bidi isolates U+2066-U+2069 (E2 81 A6..A9).
+#   bidi isolates U+2066-U+2069 (E2 81 A6..A9);
+#   bidi marks LRM/RLM U+200E-U+200F (E2 80 8E..8F);
+#   Arabic letter mark U+061C (D8 9C).
 # Plain non-ASCII text (accents, CJK, emoji) is not matched.
 has_ctrl() {
   local LC_ALL=C
@@ -154,6 +157,8 @@ has_ctrl() {
     *$'\xc2'[$'\x80'-$'\x9f']*) return 0 ;;
     *$'\xe2\x80'[$'\xa8'-$'\xae']*) return 0 ;;
     *$'\xe2\x81'[$'\xa6'-$'\xa9']*) return 0 ;;
+    *$'\xe2\x80'[$'\x8e'-$'\x8f']*) return 0 ;;
+    *$'\xd8\x9c'*) return 0 ;;
   esac
   return 1
 }
