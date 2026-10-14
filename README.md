@@ -27,19 +27,19 @@ Because these are symlinks, the live `tin-can` binary and the auto-loaded `SKILL
 ## Usage
 
 ```bash
-tin-can                         # newest handoff in ~/.claude/resume-prompts, preferring this repo's
-tin-can path/to/handoff.md      # a specific file
-tin-can --agent codex           # start Codex instead of Claude Code
-tin-can --where window          # new window/workspace (cmux) or detached session (tmux) instead of a tab
-tin-can --term print            # just print the command to paste into a tab yourself
-tin-can --dry-run               # show which file and what command, launch nothing
+tin-can path/to/handoff.md                # a specific file
+tin-can --latest                          # newest handoff in ~/.claude/resume-prompts, preferring this repo's
+tin-can --agent codex handoff.md          # start Codex instead of Claude Code
+tin-can --where window handoff.md         # new window/workspace (cmux) or detached session (tmux) instead of a tab
+tin-can --term print handoff.md           # just print the command to paste into a tab yourself
+tin-can --dry-run handoff.md              # show which file and what command, launch nothing
 ```
 
-Inside Claude Code, run it with the `!` prefix so it runs in your shell: `! tin-can`.
+Inside Claude Code, run it with the `!` prefix so it runs in your shell: `! tin-can <file>`.
 
-Options: `--agent`, `--term`, `--where`, `--cwd`, `--dir`, `--dry-run`, `--version`, `--help`. Option values must be non-empty and not start with `-`. Use `--` before a file name that starts with `-`. Environment defaults: `TIN_CAN_AGENT`, `TIN_CAN_TERM`, `TIN_CAN_DIR`.
+Options: `--agent`, `--term`, `--where`, `--cwd`, `--dir`, `--latest`, `--dry-run`, `--version`, `--help`. Option values must be non-empty and not start with `-`. Use `--` before a file name that starts with `-`. Environment defaults: `TIN_CAN_AGENT`, `TIN_CAN_TERM`, `TIN_CAN_DIR`.
 
-With no file argument, `tin-can` takes the newest `*.md` in the search directory, skips names starting with `superseded-` or `_`, and prefers files whose name contains the working directory's name as a whole word (`-`, `_` and `.` count as separators, so `cast` matches `2026-10-12-cast-next.md` but not `broadcast-plan.md`). It reports the choice on stderr. Exit codes: `0` ok, `1` launch failure (the paste-able command is printed as a fallback), `2` usage or handoff error. A path containing any of the following is refused with exit 2 when it is given explicitly (`--cwd`, `--dir`, an explicit `HANDOFF_FILE`), and the file is silently skipped when it is only an auto-selection candidate (the error says how many were skipped if nothing else qualifies): ASCII control characters (0x01-0x1F, including tab, newline, CR and ESC, and DEL 0x7F); C1 controls (U+0080-U+009F); Unicode line and paragraph separators (U+2028, U+2029); bidirectional embeddings and overrides (U+202A-U+202E); or bidirectional isolates (U+2066-U+2069). Ordinary non-ASCII text (accents, CJK, emoji) is accepted. Files with equal modification times are taken in file-name order.
+With `--latest` instead of a file, `tin-can` takes the newest `*.md` in the search directory, skips names starting with `superseded-` or `_`, and prefers files whose name contains the working directory's name as a whole word (`-`, `_` and `.` count as separators, so `cast` matches `2026-10-12-cast-next.md` but not `broadcast-plan.md`). It reports the choice on stderr. With neither a file nor `--latest` it exits 2 rather than guess; giving both is also an error. Exit codes: `0` ok, `1` launch failure (the paste-able command is printed as a fallback), `2` usage or handoff error. A path containing any of the following is refused with exit 2 when it is given explicitly (`--cwd`, `--dir`, an explicit `HANDOFF_FILE`), and the file is silently skipped when it is only an auto-selection candidate (the error says how many were skipped if nothing else qualifies): ASCII control characters (0x01-0x1F, including tab, newline, CR and ESC, and DEL 0x7F); C1 controls (U+0080-U+009F); Unicode line and paragraph separators (U+2028, U+2029); bidirectional embeddings and overrides (U+202A-U+202E); or bidirectional isolates (U+2066-U+2069). Ordinary non-ASCII text (accents, CJK, emoji) is accepted. Files with equal modification times are taken in file-name order.
 
 The handoff file is an ordinary markdown file with a `## KICKOFF` section; see [docs/handoff-format.md](docs/handoff-format.md). The bundled Claude Code skill (`skills/tin-can`) and the [AGENTS.md](AGENTS.md) snippet teach an agent to write one and tell you the command to run.
 
@@ -62,8 +62,8 @@ The command run in the new terminal is `cd 'DIR' && exec 'AGENT' 'PROMPT'`, buil
 - You run it. An agent never needs access to a terminal's control socket. The bundled skill and `AGENTS.md` tell an agent to ask you to run the command; that is an instruction, not a technical control. An agent's shell inherits `CMUX_WORKSPACE_ID` or `TMUX`, so sandboxing and permission settings are the real barrier against an agent launching sessions itself.
 - The only text given to the new agent is `Read the handoff file at <absolute path> and follow its KICKOFF section.` as a single argument.
 - File contents are never interpolated into a shell command. The directory, agent name and prompt are each single-quoted, and paths with control characters are refused outright. The test suite round-trips paths containing spaces, quotes, `$`, backticks, glob and shell metacharacters, a leading `-`, and non-ASCII text (including under `LC_ALL=C`) through bash, zsh and dash.
-- **Whoever can write into the handoff directory steers the next session.** The new agent will read the chosen file and may act on it. Auto-selection picks the newest file, or the newest whose name contains the repository name, so a file dropped into that directory can win. Mitigations in the tool: auto-selection refuses a directory that is group- or world-writable or not owned by you, and skips symlinks and files not owned by you; an explicit file that is a symlink, not yours, or inside a group- or world-writable directory prints a warning. There is no interactive confirmation, because `! tin-can` has no terminal to ask on.
-- Read the handoff before launching it, especially one written by an agent: run `tin-can --dry-run` to see which file would be used, then open it.
+- **Whoever can write into the handoff directory steers the next session.** The new agent will read the chosen file and may act on it. `--latest` picks the newest file, or the newest whose name contains the repository name, so a file dropped into that directory can win. Mitigations in the tool: auto-selection refuses a directory that is group- or world-writable or not owned by you, and skips symlinks and files not owned by you; an explicit file that is a symlink, not yours, or inside a group- or world-writable directory prints a warning. There is no interactive confirmation, because `! tin-can` has no terminal to ask on.
+- Read the handoff before launching it, especially one written by an agent: with `--latest`, run `tin-can --latest --dry-run` first to see which file would be used, then open it.
 
 ## Known limitations
 

@@ -31,7 +31,7 @@ pasting their contents. Do not put secrets in a handoff file.
 
 ## Naming and location
 
-By default `tin-can` looks in `~/.claude/resume-prompts/` (override with
+With `--latest`, `tin-can` looks in `~/.claude/resume-prompts/` (override with
 `--dir` or `$TIN_CAN_DIR`) and takes the newest `*.md`, skipping names that
 start with `superseded-` or `_`, and preferring names that contain the
 repository directory's name as a whole word (`-`, `_` and `.` are separators).

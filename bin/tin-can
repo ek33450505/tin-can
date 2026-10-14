@@ -3,7 +3,7 @@
 # tab/window: open the tab, start the agent CLI there, and give it one initial
 # prompt telling it to read a handoff file.
 #
-# Usage: tin-can [options] [HANDOFF_FILE]      (see --help)
+# Usage: tin-can [options] (HANDOFF_FILE | --latest)      (see --help)
 #
 # Exit codes: 0 ok, 1 launch failure, 2 usage/handoff error.
 # Portable to bash 3.2 (macOS /bin/bash): no mapfile, no ${x,,}, no
@@ -54,7 +54,8 @@ usage() {
   agents="${SUPPORTED_AGENTS// / | }"
   terms="${SUPPORTED_TERMS// / | }"
   cat <<EOF
-Usage: tin-can [options] [HANDOFF_FILE]
+Usage: tin-can [options] HANDOFF_FILE
+       tin-can [options] --latest
 
 Open a fresh AI coding session in a new terminal tab/window and tell it to
 read a handoff file. The only thing passed to the agent is one prompt naming
@@ -67,20 +68,21 @@ Options:
                                            (default: \$TIN_CAN_TERM or auto)
   --where tab|window                       (default: tab)
   --cwd DIR        start the agent in DIR  (default: current directory)
-  --dir DIR        handoff search directory
+  --dir DIR        handoff search directory for --latest
                    (default: \$TIN_CAN_DIR or ~/.claude/resume-prompts)
+  --latest         auto-select the newest handoff in the search dir
   --dry-run        show what would run; launch nothing
   --version        print version
   -h, --help       print this help
 
-HANDOFF_FILE: an existing readable file. If omitted, the newest *.md in the
-search directory is used (names starting with "superseded-" or "_" are
-skipped; files whose name contains the --cwd directory's name as a whole
-word are preferred). Auto-selection refuses a search directory that is
-group/world-writable or not owned by you, and skips symlinks and files not
-owned by you. Whoever can write there steers the next session: review the
-chosen file (use --dry-run) before launching. Files with equal modification
-times are taken in file-name order.
+HANDOFF_FILE: an existing readable file. It is required unless --latest is
+given; giving both is an error (exit 2). --latest takes the newest *.md in the
+search directory (names starting with "superseded-" or "_" are skipped; files
+whose name contains the --cwd directory's name as a whole word are preferred).
+Auto-selection refuses a search directory that is group/world-writable or not
+owned by you, and skips symlinks and files not owned by you. Whoever can write
+there steers the next session: review the chosen file (use --dry-run) before
+launching. Files with equal modification times are taken in file-name order.
 
 --term auto picks cmux if \$CMUX_WORKSPACE_ID is set and cmux is on PATH, else
 tmux if \$TMUX is set and tmux is on PATH, else print (the launch command is
@@ -89,7 +91,7 @@ printed so you can paste it into a new tab).
 Paths containing ASCII control characters (tab, newline, ESC, DEL), C1 controls
 (U+0080-U+009F), line/paragraph separators (U+2028-U+2029), bidi embeddings and
 overrides (U+202A-U+202E) or bidi isolates (U+2066-U+2069) are refused (exit 2)
-for --cwd, --dir and an explicit HANDOFF_FILE; auto-selection skips such files.
+for --cwd, --dir and an explicit HANDOFF_FILE; --latest skips such files.
 
 Exit codes: 0 ok, 1 launch failure, 2 usage or handoff error.
 EOF
@@ -260,7 +262,7 @@ print_fallback() { # print_fallback CMD
 main() {
   local agent="${TIN_CAN_AGENT:-claude}"
   local term="${TIN_CAN_TERM:-auto}"
-  local where="tab" where_given=0 cwd="" dry_run=0
+  local where="tab" where_given=0 cwd="" dry_run=0 latest=0
   local search_dir="${TIN_CAN_DIR:-${HOME:-}/.claude/resume-prompts}"
   local handoff_arg="" have_handoff=0
   local agent_bin repo handoff hd hbase prompt cmd session="" rc err a opt
@@ -296,6 +298,10 @@ main() {
         ;;
       --dry-run)
         dry_run=1
+        shift
+        ;;
+      --latest)
+        latest=1
         shift
         ;;
       --)
@@ -352,6 +358,13 @@ main() {
 
   if has_ctrl "$search_dir"; then
     die 2 "handoff search dir contains a control character; refusing: $(shown "$search_dir")"
+  fi
+
+  if [ "$latest" -eq 1 ] && [ "$have_handoff" -eq 1 ]; then
+    die 2 "--latest and HANDOFF_FILE are mutually exclusive: pass one or the other"
+  fi
+  if [ "$latest" -eq 0 ] && [ "$have_handoff" -eq 0 ]; then
+    die 2 "no HANDOFF_FILE given (pass the handoff file, or --latest to auto-select the newest one; see --help)"
   fi
 
   if [ "$have_handoff" -eq 1 ]; then

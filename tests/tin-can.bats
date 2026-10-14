@@ -231,7 +231,38 @@ load helpers
   [ "$status" -eq 0 ]
   [[ "$output" == *"Usage: tin-can"* ]]
   [[ "$output" == *"claude | codex"* ]]
+  [[ "$output" == *"--latest"* ]]
   [[ "$output" == *"cmux | tmux | print | auto"* ]]
+}
+
+@test "latest: no file and no --latest exits 2, names --latest, launches nothing" {
+  printf 'newer\n' >"$RESUME/newer.md"
+  export CMUX_WORKSPACE_ID=x
+  run_tc --cwd "$WORK"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--latest"* ]]
+  [[ "$output" != *"Read the handoff file"* ]]
+  [ "$(total_calls)" -eq 0 ]
+}
+
+@test "latest: no file and no --latest with --term print prints no command" {
+  printf 'newer\n' >"$RESUME/newer.md"
+  run_tc --term print --cwd "$WORK"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--latest"* ]]
+  [[ "$output" != *"cd "* ]]
+  [ "$(total_calls)" -eq 0 ]
+}
+
+@test "latest: --latest with an explicit file is rejected in either order" {
+  run_tc --term print --cwd "$WORK" --latest "$HF"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"mutually exclusive"* ]]
+  [ "$(total_calls)" -eq 0 ]
+  run_tc --term print --cwd "$WORK" "$HF" --latest
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"mutually exclusive"* ]]
+  [ "$(total_calls)" -eq 0 ]
 }
 
 # --- option parsing -------------------------------------------------------------
@@ -328,7 +359,7 @@ load helpers
   printf 'new\n' >"$RESUME/new.md"
   set_mtime "$RESUME/old.md" 202601010000
   set_mtime "$RESUME/new.md" 202601020000
-  run_tc --cwd "$TEST_ROOT" --term print
+  run_tc --latest --cwd "$TEST_ROOT" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/new.md"* ]]
   [[ "$output" == *"Read the handoff file at $RESUME/new.md"* ]]
@@ -341,7 +372,7 @@ load helpers
   set_mtime "$RESUME/real.md" 202601010000
   set_mtime "$RESUME/superseded-2026-newest.md" 202601030000
   set_mtime "$RESUME/_TEMPLATE.md" 202601040000
-  run_tc --cwd "$TEST_ROOT" --term print
+  run_tc --latest --cwd "$TEST_ROOT" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/real.md"* ]]
 }
@@ -349,7 +380,7 @@ load helpers
 @test "handoff: only excluded files present exits 2" {
   printf 's\n' >"$RESUME/superseded-x.md"
   printf 't\n' >"$RESUME/_TEMPLATE.md"
-  run_tc --cwd "$TEST_ROOT" --term print
+  run_tc --latest --cwd "$TEST_ROOT" --term print
   [ "$status" -eq 2 ]
   [[ "$output" == *"no handoff file found"* ]]
 }
@@ -359,7 +390,7 @@ load helpers
   printf 'y\n' >"$RESUME/real.md"
   set_mtime "$RESUME/real.md" 202601010000
   set_mtime "$RESUME/notes.txt" 202601050000
-  run_tc --cwd "$TEST_ROOT" --term print
+  run_tc --latest --cwd "$TEST_ROOT" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/real.md"* ]]
 }
@@ -370,14 +401,14 @@ load helpers
   ln -s "$TEST_ROOT/does-not-exist" "$RESUME/dangling.md"
   set_mtime "$RESUME/real.md" 202601010000
   set_mtime "$RESUME/newest.md" 202601050000
-  run_tc --cwd "$TEST_ROOT" --term print
+  run_tc --latest --cwd "$TEST_ROOT" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/real.md"* ]]
 }
 
 @test "handoff: only a directory named x.md present exits 2" {
   mkdir "$RESUME/only.md"
-  run_tc --cwd "$TEST_ROOT" --term print
+  run_tc --latest --cwd "$TEST_ROOT" --term print
   [ "$status" -eq 2 ]
   [[ "$output" == *"no handoff file found"* ]]
 }
@@ -387,7 +418,7 @@ load helpers
   printf 'b\n' >"$RESUME/2026-10-02-otherrepo-thing.md"
   set_mtime "$RESUME/2026-10-01-myrepo-feature.md" 202610010000
   set_mtime "$RESUME/2026-10-02-otherrepo-thing.md" 202610020000
-  run_tc --cwd "$WORK" --term print
+  run_tc --latest --cwd "$WORK" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/2026-10-01-myrepo-feature.md"* ]]
 }
@@ -398,7 +429,7 @@ load helpers
   printf 'b\n' >"$RESUME/notes.md"
   set_mtime "$RESUME/broadcast-plan.md" 202610010000
   set_mtime "$RESUME/notes.md" 202610020000
-  run_tc --cwd "$TEST_ROOT/work/cast" --term print
+  run_tc --latest --cwd "$TEST_ROOT/work/cast" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/notes.md"* ]]
 }
@@ -409,7 +440,7 @@ load helpers
   printf 'b\n' >"$RESUME/notes.md"
   set_mtime "$RESUME/2026-10-12-cast-next.md" 202610010000
   set_mtime "$RESUME/notes.md" 202610020000
-  run_tc --cwd "$TEST_ROOT/work/cast" --term print
+  run_tc --latest --cwd "$TEST_ROOT/work/cast" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/2026-10-12-cast-next.md"* ]]
 }
@@ -420,7 +451,7 @@ load helpers
   printf 'b\n' >"$RESUME/notes.md"
   set_mtime "$RESUME/x_my-repo_y.md" 202610010000
   set_mtime "$RESUME/notes.md" 202610020000
-  run_tc --cwd "$TEST_ROOT/work/my.repo" --term print
+  run_tc --latest --cwd "$TEST_ROOT/work/my.repo" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/x_my-repo_y.md"* ]]
 }
@@ -430,7 +461,7 @@ load helpers
   printf 'b\n' >"$RESUME/2026-10-02-beta.md"
   set_mtime "$RESUME/2026-10-01-alpha.md" 202610010000
   set_mtime "$RESUME/2026-10-02-beta.md" 202610020000
-  run_tc --cwd "$WORK" --term print
+  run_tc --latest --cwd "$WORK" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/2026-10-02-beta.md"* ]]
 }
@@ -440,20 +471,21 @@ load helpers
   printf 'b\n' >"$RESUME/myrepo-new.md"
   set_mtime "$RESUME/myrepo-old.md" 202610010000
   set_mtime "$RESUME/myrepo-new.md" 202610020000
-  run_tc --cwd "$WORK" --term print
+  run_tc --latest --cwd "$WORK" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/myrepo-new.md"* ]]
 }
 
 @test "handoff: empty search dir exits 2" {
-  run_tc --cwd "$WORK" --term print
+  run_tc --latest --cwd "$WORK" --term print
   [ "$status" -eq 2 ]
   [[ "$output" == *"no handoff file found"* ]]
 }
 
 @test "handoff: missing search dir exits 2" {
-  run_tc --cwd "$WORK" --term print --dir "$TEST_ROOT/nope"
+  run_tc --latest --cwd "$WORK" --term print --dir "$TEST_ROOT/nope"
   [ "$status" -eq 2 ]
+  [[ "$output" == *"handoff search dir not found"* ]]
 }
 
 @test "handoff: --dir and TIN_CAN_DIR choose the search directory" {
@@ -462,10 +494,10 @@ load helpers
   printf 'x\n' >"$TEST_ROOT/other1/one.md"
   printf 'x\n' >"$TEST_ROOT/other2/two.md"
   export TIN_CAN_DIR="$TEST_ROOT/other1"
-  run_tc --cwd "$TEST_ROOT" --term print
+  run_tc --latest --cwd "$TEST_ROOT" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $TEST_ROOT/other1/one.md"* ]]
-  run_tc --cwd "$TEST_ROOT" --term print --dir "$TEST_ROOT/other2"
+  run_tc --latest --cwd "$TEST_ROOT" --term print --dir "$TEST_ROOT/other2"
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $TEST_ROOT/other2/two.md"* ]]
 }
@@ -479,11 +511,15 @@ load helpers
 @test "handoff: a directory given as the handoff exits 2" {
   run_tc --cwd "$WORK" --term print "$TEST_ROOT"
   [ "$status" -eq 2 ]
+  [[ "$output" == *"not an existing regular file"* ]]
+  [ "$(total_calls)" -eq 0 ]
 }
 
 @test "handoff: empty-string handoff exits 2" {
   run_tc --cwd "$WORK" --term print ""
   [ "$status" -eq 2 ]
+  [[ "$output" == *"not an existing regular file"* ]]
+  [ "$(total_calls)" -eq 0 ]
 }
 
 @test "handoff: unreadable file exits 2" {
@@ -507,7 +543,7 @@ load helpers
 @test "trust: a world-writable search dir (777) is refused for auto-selection" {
   printf 'x\n' >"$RESUME/real.md"
   chmod 777 "$RESUME"
-  run_tc --cwd "$WORK" --term print
+  run_tc --latest --cwd "$WORK" --term print
   chmod 755 "$RESUME"
   [ "$status" -eq 2 ]
   [[ "$output" == *"group- or world-writable"* ]]
@@ -517,7 +553,7 @@ load helpers
 @test "trust: a group-writable search dir (775) is refused for auto-selection" {
   printf 'x\n' >"$RESUME/real.md"
   chmod 775 "$RESUME"
-  run_tc --cwd "$WORK" --term print
+  run_tc --latest --cwd "$WORK" --term print
   chmod 755 "$RESUME"
   [ "$status" -eq 2 ]
   [[ "$output" == *"group- or world-writable"* ]]
@@ -543,7 +579,7 @@ load helpers
   printf 'b\n' >"$RESUME/b.md"
   set_mtime "$RESUME/a.md" 202610010000
   set_mtime "$RESUME/b.md" 202610010000
-  run_tc --cwd "$TEST_ROOT" --term print
+  run_tc --latest --cwd "$TEST_ROOT" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/a.md"* ]]
 }
@@ -554,7 +590,7 @@ load helpers
   ln -s "$TEST_ROOT/elsewhere.md" "$RESUME/link.md"
   set_mtime "$RESUME/real.md" 202601010000
   set_mtime "$TEST_ROOT/elsewhere.md" 202601050000
-  run_tc --cwd "$TEST_ROOT" --term print
+  run_tc --latest --cwd "$TEST_ROOT" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/real.md"* ]]
 }
@@ -562,14 +598,14 @@ load helpers
 @test "trust: when only a symlink candidate exists the error says why" {
   printf 'target\n' >"$TEST_ROOT/elsewhere.md"
   ln -s "$TEST_ROOT/elsewhere.md" "$RESUME/link.md"
-  run_tc --cwd "$TEST_ROOT" --term print
+  run_tc --latest --cwd "$TEST_ROOT" --term print
   [ "$status" -eq 2 ]
   [[ "$output" == *"1 candidate(s) skipped: symlink, not owned by you"* ]]
 }
 
 @test "trust: a candidate whose name has a control character is skipped" {
   printf 'x\n' >"$RESUME/$(printf 'ta\tb').md"
-  run_tc --cwd "$TEST_ROOT" --term print
+  run_tc --latest --cwd "$TEST_ROOT" --term print
   [ "$status" -eq 2 ]
   [[ "$output" == *"candidate(s) skipped"* ]]
 }
