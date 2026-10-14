@@ -966,16 +966,20 @@ find_dash() {
 @test "unicode controls: boundary characters just outside the refused ranges are not 'control' errors" {
   # Non-existent --cwd, so no file name has to be creatable (APFS rejects
   # some unassigned code points). The error must be the "not a directory" one.
-  local n
-  for n in "$(printf '\342\200\247')" "$(printf '\342\200\257')" \
-    "$(printf '\342\201\245')" "$(printf '\342\201\252')" \
-    "$(printf '\302\240')" "$(printf '\303\201')" \
-    "$(printf '\342\200\215')" "$(printf '\342\200\220')" \
-    "$(printf '\330\233')" "$(printf '\330\235')"; do
-    run_tc --term print --cwd "$TEST_ROOT/no-such/a${n}b" "$HF"
+  # Each input is paired with its octal rendering: the error must name THIS
+  # input, escaped (UTF-8 locale, so bash 3.2's locale path is exercised).
+  local oct raw
+  for oct in '\342\200\247' '\342\200\257' '\342\201\245' '\342\201\252' \
+    '\302\240' '\303\201' '\342\200\215' '\342\200\220' '\330\233' '\330\235'; do
+    # shellcheck disable=SC2059
+    raw="$(printf "$oct")"
+    run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print --cwd "$TEST_ROOT/no-such/a${raw}b" "$HF"
+    # '|| return 1': bash 3.2 does not fail a test on a non-final [[ ]].
     [ "$status" -eq 2 ]
-    [[ "$output" == *"--cwd is not a directory"* ]]
-    [[ "$output" != *"control character"* ]]
+    [[ "$output" == *"--cwd is not a directory: "* ]] || return 1
+    [[ "$output" == *"$oct"* ]] || return 1
+    [[ "$output" != *"$raw"* ]] || return 1
+    [[ "$output" != *"control character"* ]] || return 1
   done
 }
 
@@ -992,13 +996,16 @@ find_dash() {
 }
 
 @test "unicode controls: error messages show C1/bidi bytes escaped, never raw (UTF-8 locale)" {
-  local raw
-  for raw in "$(printf '\302\233')" "$(printf '\342\200\256')"; do
+  local oct raw
+  for oct in '\302\233' '\342\200\256' '\342\200\216' '\330\234'; do
+    # shellcheck disable=SC2059
+    raw="$(printf "$oct")"
     run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print --cwd "$TEST_ROOT/no-such/a${raw}b" "$HF"
+    # '|| return 1': bash 3.2 does not fail a test on a non-final [[ ]].
     [ "$status" -eq 2 ]
-    [[ "$output" == *"control character"* ]]
-    [[ "$output" != *"$raw"* ]]
-    [[ "$output" == *'\302\233'* || "$output" == *'\342\200\256'* ]]
+    [[ "$output" == *"control character"* ]] || return 1
+    [[ "$output" == *"$oct"* ]] || return 1
+    [[ "$output" != *"$raw"* ]] || return 1
   done
 }
 
