@@ -231,7 +231,38 @@ load helpers
   [ "$status" -eq 0 ]
   [[ "$output" == *"Usage: tin-can"* ]]
   [[ "$output" == *"claude | codex"* ]]
+  [[ "$output" == *"--latest"* ]]
   [[ "$output" == *"cmux | tmux | print | auto"* ]]
+}
+
+@test "latest: no file and no --latest exits 2, names --latest, launches nothing" {
+  printf 'newer\n' >"$RESUME/newer.md"
+  export CMUX_WORKSPACE_ID=x
+  run_tc --cwd "$WORK"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--latest"* ]]
+  [[ "$output" != *"Read the handoff file"* ]]
+  [ "$(total_calls)" -eq 0 ]
+}
+
+@test "latest: no file and no --latest with --term print prints no command" {
+  printf 'newer\n' >"$RESUME/newer.md"
+  run_tc --term print --cwd "$WORK"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--latest"* ]]
+  [[ "$output" != *"cd "* ]]
+  [ "$(total_calls)" -eq 0 ]
+}
+
+@test "latest: --latest with an explicit file is rejected in either order" {
+  run_tc --term print --cwd "$WORK" --latest "$HF"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"mutually exclusive"* ]]
+  [ "$(total_calls)" -eq 0 ]
+  run_tc --term print --cwd "$WORK" "$HF" --latest
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"mutually exclusive"* ]]
+  [ "$(total_calls)" -eq 0 ]
 }
 
 # --- option parsing -------------------------------------------------------------
@@ -328,7 +359,7 @@ load helpers
   printf 'new\n' >"$RESUME/new.md"
   set_mtime "$RESUME/old.md" 202601010000
   set_mtime "$RESUME/new.md" 202601020000
-  run_tc --cwd "$TEST_ROOT" --term print
+  run_tc --latest --cwd "$TEST_ROOT" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/new.md"* ]]
   [[ "$output" == *"Read the handoff file at $RESUME/new.md"* ]]
@@ -341,7 +372,7 @@ load helpers
   set_mtime "$RESUME/real.md" 202601010000
   set_mtime "$RESUME/superseded-2026-newest.md" 202601030000
   set_mtime "$RESUME/_TEMPLATE.md" 202601040000
-  run_tc --cwd "$TEST_ROOT" --term print
+  run_tc --latest --cwd "$TEST_ROOT" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/real.md"* ]]
 }
@@ -349,7 +380,7 @@ load helpers
 @test "handoff: only excluded files present exits 2" {
   printf 's\n' >"$RESUME/superseded-x.md"
   printf 't\n' >"$RESUME/_TEMPLATE.md"
-  run_tc --cwd "$TEST_ROOT" --term print
+  run_tc --latest --cwd "$TEST_ROOT" --term print
   [ "$status" -eq 2 ]
   [[ "$output" == *"no handoff file found"* ]]
 }
@@ -359,7 +390,7 @@ load helpers
   printf 'y\n' >"$RESUME/real.md"
   set_mtime "$RESUME/real.md" 202601010000
   set_mtime "$RESUME/notes.txt" 202601050000
-  run_tc --cwd "$TEST_ROOT" --term print
+  run_tc --latest --cwd "$TEST_ROOT" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/real.md"* ]]
 }
@@ -370,14 +401,14 @@ load helpers
   ln -s "$TEST_ROOT/does-not-exist" "$RESUME/dangling.md"
   set_mtime "$RESUME/real.md" 202601010000
   set_mtime "$RESUME/newest.md" 202601050000
-  run_tc --cwd "$TEST_ROOT" --term print
+  run_tc --latest --cwd "$TEST_ROOT" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/real.md"* ]]
 }
 
 @test "handoff: only a directory named x.md present exits 2" {
   mkdir "$RESUME/only.md"
-  run_tc --cwd "$TEST_ROOT" --term print
+  run_tc --latest --cwd "$TEST_ROOT" --term print
   [ "$status" -eq 2 ]
   [[ "$output" == *"no handoff file found"* ]]
 }
@@ -387,7 +418,7 @@ load helpers
   printf 'b\n' >"$RESUME/2026-10-02-otherrepo-thing.md"
   set_mtime "$RESUME/2026-10-01-myrepo-feature.md" 202610010000
   set_mtime "$RESUME/2026-10-02-otherrepo-thing.md" 202610020000
-  run_tc --cwd "$WORK" --term print
+  run_tc --latest --cwd "$WORK" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/2026-10-01-myrepo-feature.md"* ]]
 }
@@ -398,7 +429,7 @@ load helpers
   printf 'b\n' >"$RESUME/notes.md"
   set_mtime "$RESUME/broadcast-plan.md" 202610010000
   set_mtime "$RESUME/notes.md" 202610020000
-  run_tc --cwd "$TEST_ROOT/work/cast" --term print
+  run_tc --latest --cwd "$TEST_ROOT/work/cast" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/notes.md"* ]]
 }
@@ -409,7 +440,7 @@ load helpers
   printf 'b\n' >"$RESUME/notes.md"
   set_mtime "$RESUME/2026-10-12-cast-next.md" 202610010000
   set_mtime "$RESUME/notes.md" 202610020000
-  run_tc --cwd "$TEST_ROOT/work/cast" --term print
+  run_tc --latest --cwd "$TEST_ROOT/work/cast" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/2026-10-12-cast-next.md"* ]]
 }
@@ -420,7 +451,7 @@ load helpers
   printf 'b\n' >"$RESUME/notes.md"
   set_mtime "$RESUME/x_my-repo_y.md" 202610010000
   set_mtime "$RESUME/notes.md" 202610020000
-  run_tc --cwd "$TEST_ROOT/work/my.repo" --term print
+  run_tc --latest --cwd "$TEST_ROOT/work/my.repo" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/x_my-repo_y.md"* ]]
 }
@@ -430,7 +461,7 @@ load helpers
   printf 'b\n' >"$RESUME/2026-10-02-beta.md"
   set_mtime "$RESUME/2026-10-01-alpha.md" 202610010000
   set_mtime "$RESUME/2026-10-02-beta.md" 202610020000
-  run_tc --cwd "$WORK" --term print
+  run_tc --latest --cwd "$WORK" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/2026-10-02-beta.md"* ]]
 }
@@ -440,20 +471,21 @@ load helpers
   printf 'b\n' >"$RESUME/myrepo-new.md"
   set_mtime "$RESUME/myrepo-old.md" 202610010000
   set_mtime "$RESUME/myrepo-new.md" 202610020000
-  run_tc --cwd "$WORK" --term print
+  run_tc --latest --cwd "$WORK" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/myrepo-new.md"* ]]
 }
 
 @test "handoff: empty search dir exits 2" {
-  run_tc --cwd "$WORK" --term print
+  run_tc --latest --cwd "$WORK" --term print
   [ "$status" -eq 2 ]
   [[ "$output" == *"no handoff file found"* ]]
 }
 
 @test "handoff: missing search dir exits 2" {
-  run_tc --cwd "$WORK" --term print --dir "$TEST_ROOT/nope"
+  run_tc --latest --cwd "$WORK" --term print --dir "$TEST_ROOT/nope"
   [ "$status" -eq 2 ]
+  [[ "$output" == *"handoff search dir not found"* ]]
 }
 
 @test "handoff: --dir and TIN_CAN_DIR choose the search directory" {
@@ -462,10 +494,10 @@ load helpers
   printf 'x\n' >"$TEST_ROOT/other1/one.md"
   printf 'x\n' >"$TEST_ROOT/other2/two.md"
   export TIN_CAN_DIR="$TEST_ROOT/other1"
-  run_tc --cwd "$TEST_ROOT" --term print
+  run_tc --latest --cwd "$TEST_ROOT" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $TEST_ROOT/other1/one.md"* ]]
-  run_tc --cwd "$TEST_ROOT" --term print --dir "$TEST_ROOT/other2"
+  run_tc --latest --cwd "$TEST_ROOT" --term print --dir "$TEST_ROOT/other2"
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $TEST_ROOT/other2/two.md"* ]]
 }
@@ -479,11 +511,15 @@ load helpers
 @test "handoff: a directory given as the handoff exits 2" {
   run_tc --cwd "$WORK" --term print "$TEST_ROOT"
   [ "$status" -eq 2 ]
+  [[ "$output" == *"not an existing regular file"* ]]
+  [ "$(total_calls)" -eq 0 ]
 }
 
 @test "handoff: empty-string handoff exits 2" {
   run_tc --cwd "$WORK" --term print ""
   [ "$status" -eq 2 ]
+  [[ "$output" == *"not an existing regular file"* ]]
+  [ "$(total_calls)" -eq 0 ]
 }
 
 @test "handoff: unreadable file exits 2" {
@@ -507,7 +543,7 @@ load helpers
 @test "trust: a world-writable search dir (777) is refused for auto-selection" {
   printf 'x\n' >"$RESUME/real.md"
   chmod 777 "$RESUME"
-  run_tc --cwd "$WORK" --term print
+  run_tc --latest --cwd "$WORK" --term print
   chmod 755 "$RESUME"
   [ "$status" -eq 2 ]
   [[ "$output" == *"group- or world-writable"* ]]
@@ -517,7 +553,7 @@ load helpers
 @test "trust: a group-writable search dir (775) is refused for auto-selection" {
   printf 'x\n' >"$RESUME/real.md"
   chmod 775 "$RESUME"
-  run_tc --cwd "$WORK" --term print
+  run_tc --latest --cwd "$WORK" --term print
   chmod 755 "$RESUME"
   [ "$status" -eq 2 ]
   [[ "$output" == *"group- or world-writable"* ]]
@@ -543,7 +579,7 @@ load helpers
   printf 'b\n' >"$RESUME/b.md"
   set_mtime "$RESUME/a.md" 202610010000
   set_mtime "$RESUME/b.md" 202610010000
-  run_tc --cwd "$TEST_ROOT" --term print
+  run_tc --latest --cwd "$TEST_ROOT" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/a.md"* ]]
 }
@@ -554,7 +590,7 @@ load helpers
   ln -s "$TEST_ROOT/elsewhere.md" "$RESUME/link.md"
   set_mtime "$RESUME/real.md" 202601010000
   set_mtime "$TEST_ROOT/elsewhere.md" 202601050000
-  run_tc --cwd "$TEST_ROOT" --term print
+  run_tc --latest --cwd "$TEST_ROOT" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/real.md"* ]]
 }
@@ -562,16 +598,26 @@ load helpers
 @test "trust: when only a symlink candidate exists the error says why" {
   printf 'target\n' >"$TEST_ROOT/elsewhere.md"
   ln -s "$TEST_ROOT/elsewhere.md" "$RESUME/link.md"
-  run_tc --cwd "$TEST_ROOT" --term print
+  run_tc --latest --cwd "$TEST_ROOT" --term print
   [ "$status" -eq 2 ]
   [[ "$output" == *"1 candidate(s) skipped: symlink, not owned by you"* ]]
 }
 
 @test "trust: a candidate whose name has a control character is skipped" {
   printf 'x\n' >"$RESUME/$(printf 'ta\tb').md"
-  run_tc --cwd "$TEST_ROOT" --term print
+  run_tc --latest --cwd "$TEST_ROOT" --term print
   [ "$status" -eq 2 ]
   [[ "$output" == *"candidate(s) skipped"* ]]
+}
+
+@test "trust: a candidate whose name has an RLM mark is skipped even when newest" {
+  printf 'old\n' >"$RESUME/older.md"
+  printf 'x\n' >"$RESUME/$(printf 'new\342\200\217x').md"
+  set_mtime "$RESUME/older.md" 202601010000
+  set_mtime "$RESUME/$(printf 'new\342\200\217x').md" 202601050000
+  run_tc --latest --cwd "$TEST_ROOT" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"tin-can: using $RESUME/older.md"* ]]
 }
 
 @test "trust: an explicit symlink handoff is allowed but warns" {
@@ -785,6 +831,13 @@ find_dash() {
   [[ "$output" == *"control character"* ]]
 }
 
+@test "control chars: an LRM mark in --dir is refused" {
+  mkdir -p "$TEST_ROOT/ctld/$(printf 'a\342\200\216b')"
+  run_tc --term print --latest --cwd "$WORK" --dir "$TEST_ROOT/ctld/$(printf 'a\342\200\216b')"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"control character"* ]]
+}
+
 @test "control chars: a symlinked --cwd whose real path has a control character is refused" {
   mkdir -p "$TEST_ROOT/real$(printf '\t')dir"
   ln -s "$TEST_ROOT/real$(printf '\t')dir" "$TEST_ROOT/clean-link"
@@ -880,7 +933,8 @@ find_dash() {
   local n
   for n in "$(printf 'a\302\233b')" "$(printf 'a\302\200b')" "$(printf 'a\302\237b')" \
     "$(printf 'a\342\200\256b')" "$(printf 'a\342\200\252b')" "$(printf 'a\342\200\250b')" \
-    "$(printf 'a\342\200\251b')" "$(printf 'a\342\201\246b')" "$(printf 'a\342\201\251b')"; do
+    "$(printf 'a\342\200\251b')" "$(printf 'a\342\201\246b')" "$(printf 'a\342\201\251b')" \
+    "$(printf 'a\342\200\216b')" "$(printf 'a\342\200\217b')" "$(printf 'a\330\234b')"; do
     mkdir -p "$TEST_ROOT/uc/$n"
     run_tc --term print --cwd "$TEST_ROOT/uc/$n" "$HF"
     [ "$status" -eq 2 ]
@@ -889,10 +943,11 @@ find_dash() {
   done
 }
 
-@test "unicode controls: U+009B and U+202E in the handoff path are refused" {
+@test "unicode controls: C1, bidi and mark characters in the handoff path are refused" {
   local n
   mkdir -p "$TEST_ROOT/uch"
-  for n in "$(printf 'a\302\233b.md')" "$(printf 'a\342\200\256b.md')"; do
+  for n in "$(printf 'a\302\233b.md')" "$(printf 'a\342\200\256b.md')" \
+    "$(printf 'a\342\200\216b.md')" "$(printf 'a\330\234b.md')"; do
     printf 'x\n' >"$TEST_ROOT/uch/$n"
     run_tc --term print --cwd "$WORK" "$TEST_ROOT/uch/$n"
     [ "$status" -eq 2 ]
@@ -911,14 +966,20 @@ find_dash() {
 @test "unicode controls: boundary characters just outside the refused ranges are not 'control' errors" {
   # Non-existent --cwd, so no file name has to be creatable (APFS rejects
   # some unassigned code points). The error must be the "not a directory" one.
-  local n
-  for n in "$(printf '\342\200\247')" "$(printf '\342\200\257')" \
-    "$(printf '\342\201\245')" "$(printf '\342\201\252')" \
-    "$(printf '\302\240')" "$(printf '\303\201')"; do
-    run_tc --term print --cwd "$TEST_ROOT/no-such/a${n}b" "$HF"
+  # Each input is paired with its octal rendering: the error must name THIS
+  # input, escaped (UTF-8 locale, so bash 3.2's locale path is exercised).
+  local oct raw
+  for oct in '\342\200\247' '\342\200\257' '\342\201\245' '\342\201\252' \
+    '\302\240' '\303\201' '\342\200\215' '\342\200\220' '\330\233' '\330\235'; do
+    # shellcheck disable=SC2059
+    raw="$(printf "$oct")"
+    run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print --cwd "$TEST_ROOT/no-such/a${raw}b" "$HF"
+    # '|| return 1': bash 3.2 does not fail a test on a non-final [[ ]].
     [ "$status" -eq 2 ]
-    [[ "$output" == *"--cwd is not a directory"* ]]
-    [[ "$output" != *"control character"* ]]
+    [[ "$output" == *"--cwd is not a directory: "* ]] || return 1
+    [[ "$output" == *"$oct"* ]] || return 1
+    [[ "$output" != *"$raw"* ]] || return 1
+    [[ "$output" != *"control character"* ]] || return 1
   done
 }
 
@@ -926,7 +987,8 @@ find_dash() {
   local n
   for n in "$(printf '\302\200')" "$(printf '\302\237')" \
     "$(printf '\342\200\250')" "$(printf '\342\200\256')" \
-    "$(printf '\342\201\246')" "$(printf '\342\201\251')"; do
+    "$(printf '\342\201\246')" "$(printf '\342\201\251')" \
+    "$(printf '\342\200\216')" "$(printf '\342\200\217')" "$(printf '\330\234')"; do
     run_tc --term print --cwd "$TEST_ROOT/no-such/a${n}b" "$HF"
     [ "$status" -eq 2 ]
     [[ "$output" == *"control character"* ]]
@@ -934,12 +996,140 @@ find_dash() {
 }
 
 @test "unicode controls: error messages show C1/bidi bytes escaped, never raw (UTF-8 locale)" {
-  local raw
-  for raw in "$(printf '\302\233')" "$(printf '\342\200\256')"; do
+  local oct raw
+  for oct in '\302\233' '\342\200\256' '\342\200\216' '\330\234'; do
+    # shellcheck disable=SC2059
+    raw="$(printf "$oct")"
     run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print --cwd "$TEST_ROOT/no-such/a${raw}b" "$HF"
+    # '|| return 1': bash 3.2 does not fail a test on a non-final [[ ]].
     [ "$status" -eq 2 ]
-    [[ "$output" == *"control character"* ]]
-    [[ "$output" != *"$raw"* ]]
-    [[ "$output" == *'\302\233'* || "$output" == *'\342\200\256'* ]]
+    [[ "$output" == *"control character"* ]] || return 1
+    [[ "$output" == *"$oct"* ]] || return 1
+    [[ "$output" != *"$raw"* ]] || return 1
   done
+}
+
+# ZWSP (U+200B) is not refused by has_ctrl, so it reaches the path error and
+# warning messages, which must show it escaped via shown(), never raw.
+@test "path in error: --cwd not a directory shows ZWSP escaped (UTF-8 locale)" {
+  local z; z="$(printf '\342\200\213')"
+  run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print --cwd "$TEST_ROOT/no-such/a${z}b" "$HF"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--cwd is not a directory"* ]]
+  [[ "$output" != *"$z"* ]]
+  [[ "$output" == *'\342\200\213'* ]]
+  [ "$(total_calls)" -eq 0 ]
+}
+
+@test "path in error: handoff not a regular file shows ZWSP escaped (UTF-8 locale)" {
+  local z; z="$(printf '\342\200\213')"
+  run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print "$TEST_ROOT/no-such/h${z}.md"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"handoff is not an existing regular file"* ]]
+  [[ "$output" != *"$z"* ]]
+  [[ "$output" == *'\342\200\213'* ]]
+  [ "$(total_calls)" -eq 0 ]
+}
+
+@test "path in error: --dir not found shows ZWSP escaped (UTF-8 locale)" {
+  local z; z="$(printf '\342\200\213')"
+  run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print --latest --dir "$TEST_ROOT/no-such/d${z}"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"handoff search dir not found"* ]]
+  [[ "$output" != *"$z"* ]]
+  [[ "$output" == *'\342\200\213'* ]]
+  [ "$(total_calls)" -eq 0 ]
+}
+
+@test "path in warning: symlink handoff warning shows ZWSP escaped (UTF-8 locale)" {
+  local z line found=0; z="$(printf '\342\200\213')"
+  mkdir -p "$TEST_ROOT/zw"
+  chmod 700 "$TEST_ROOT/zw"
+  ln -s "$HF" "$TEST_ROOT/zw/s${z}.md"
+  run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print "$TEST_ROOT/zw/s${z}.md"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"handoff file is a symlink"* ]]
+  while IFS= read -r line; do
+    if [[ "$line" == *"handoff file is a symlink:"* ]]; then
+      found=1
+      [[ "$line" != *"$z"* ]]
+      [[ "$line" == *'\342\200\213'* ]]
+    fi
+  done <<< "$output"
+  [ "$found" -eq 1 ]
+}
+
+@test "path in warning: world-writable handoff dir warning shows ZWSP escaped (UTF-8 locale)" {
+  local z line found=0; z="$(printf '\342\200\213')"
+  mkdir -p "$TEST_ROOT/ww${z}d"
+  printf 'x\n' >"$TEST_ROOT/ww${z}d/ok.md"
+  chmod 777 "$TEST_ROOT/ww${z}d"
+  run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print "$TEST_ROOT/ww${z}d/ok.md"
+  [ "$status" -eq 0 ]
+  while IFS= read -r line; do
+    if [[ "$line" == *"group- or world-writable directory"* ]]; then
+      found=1
+      [[ "$line" != *"$z"* ]]
+      [[ "$line" == *'\342\200\213'* ]]
+    fi
+  done <<< "$output"
+  [ "$found" -eq 1 ]
+}
+
+@test "path in error: no handoff file found shows ZWSP escaped (UTF-8 locale)" {
+  local z; z="$(printf '\342\200\213')"
+  mkdir -p "$TEST_ROOT/e${z}d"
+  chmod 755 "$TEST_ROOT/e${z}d"
+  run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print --latest --dir "$TEST_ROOT/e${z}d"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"no handoff file found in"* ]]
+  [[ "$output" != *"$z"* ]]
+  [[ "$output" == *'\342\200\213'* ]]
+  [ "$(total_calls)" -eq 0 ]
+}
+
+@test "path in error: unreadable handoff shows ZWSP escaped (UTF-8 locale)" {
+  if [ "$(id -u)" -eq 0 ]; then skip "root can read anything"; fi
+  local z; z="$(printf '\342\200\213')"
+  printf 'x\n' >"$TEST_ROOT/h${z}.md"
+  chmod 000 "$TEST_ROOT/h${z}.md"
+  run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print "$TEST_ROOT/h${z}.md"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"not readable"* ]]
+  [[ "$output" != *"$z"* ]]
+  [[ "$output" == *'\342\200\213'* ]]
+  [ "$(total_calls)" -eq 0 ]
+}
+
+@test "path in report: auto-select 'using' line shows ZWSP escaped (UTF-8 locale)" {
+  local z line found=0; z="$(printf '\342\200\213')"
+  printf 'x\n' >"$RESUME/n${z}.md"
+  run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print --latest
+  [ "$status" -eq 0 ]
+  while IFS= read -r line; do
+    if [[ "$line" == "tin-can: using "* ]]; then
+      found=1
+      [[ "$line" != *"$z"* ]]
+      [[ "$line" == *'\342\200\213'* ]]
+    fi
+  done <<< "$output"
+  [ "$found" -eq 1 ]
+}
+
+# raw_path_sites FILE: lines where die 2 / warn / FIND_ERR= still print a path
+# variable raw. $(shown "...") wrappers are stripped first, so a line that
+# escapes one path cannot hide a second, raw one.
+raw_path_sites() {
+  sed -E 's/\$\(shown "[^"]*"\)//g' "$1" |
+    grep -nE '(die 2|warn|FIND_ERR=).*\$(cwd|dir|cdir|hd|handoff|handoff_arg)\b'
+}
+
+@test "static guard: no die 2 / warn / FIND_ERR line interpolates a path variable raw" {
+  [ -r "$TC" ]
+  run raw_path_sites "$TC"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  run grep -c 'using %s.*"\$(shown "\$handoff")"' "$TC"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
 }

@@ -3,7 +3,7 @@
 # tab/window: open the tab, start the agent CLI there, and give it one initial
 # prompt telling it to read a handoff file.
 #
-# Usage: tin-can [options] [HANDOFF_FILE]      (see --help)
+# Usage: tin-can [options] (HANDOFF_FILE | --latest)      (see --help)
 #
 # Exit codes: 0 ok, 1 launch failure, 2 usage/handoff error.
 # Portable to bash 3.2 (macOS /bin/bash): no mapfile, no ${x,,}, no
@@ -54,7 +54,8 @@ usage() {
   agents="${SUPPORTED_AGENTS// / | }"
   terms="${SUPPORTED_TERMS// / | }"
   cat <<EOF
-Usage: tin-can [options] [HANDOFF_FILE]
+Usage: tin-can [options] HANDOFF_FILE
+       tin-can [options] --latest
 
 Open a fresh AI coding session in a new terminal tab/window and tell it to
 read a handoff file. The only thing passed to the agent is one prompt naming
@@ -67,20 +68,21 @@ Options:
                                            (default: \$TIN_CAN_TERM or auto)
   --where tab|window                       (default: tab)
   --cwd DIR        start the agent in DIR  (default: current directory)
-  --dir DIR        handoff search directory
+  --dir DIR        handoff search directory for --latest
                    (default: \$TIN_CAN_DIR or ~/.claude/resume-prompts)
+  --latest         auto-select the newest handoff in the search dir
   --dry-run        show what would run; launch nothing
   --version        print version
   -h, --help       print this help
 
-HANDOFF_FILE: an existing readable file. If omitted, the newest *.md in the
-search directory is used (names starting with "superseded-" or "_" are
-skipped; files whose name contains the --cwd directory's name as a whole
-word are preferred). Auto-selection refuses a search directory that is
-group/world-writable or not owned by you, and skips symlinks and files not
-owned by you. Whoever can write there steers the next session: review the
-chosen file (use --dry-run) before launching. Files with equal modification
-times are taken in file-name order.
+HANDOFF_FILE: an existing readable file. It is required unless --latest is
+given; giving both is an error (exit 2). --latest takes the newest *.md in the
+search directory (names starting with "superseded-" or "_" are skipped; files
+whose name contains the --cwd directory's name as a whole word are preferred).
+Auto-selection refuses a search directory that is group/world-writable or not
+owned by you, and skips symlinks and files not owned by you. Whoever can write
+there steers the next session: review the chosen file (use --dry-run) before
+launching. Files with equal modification times are taken in file-name order.
 
 --term auto picks cmux if \$CMUX_WORKSPACE_ID is set and cmux is on PATH, else
 tmux if \$TMUX is set and tmux is on PATH, else print (the launch command is
@@ -88,8 +90,9 @@ printed so you can paste it into a new tab).
 
 Paths containing ASCII control characters (tab, newline, ESC, DEL), C1 controls
 (U+0080-U+009F), line/paragraph separators (U+2028-U+2029), bidi embeddings and
-overrides (U+202A-U+202E) or bidi isolates (U+2066-U+2069) are refused (exit 2)
-for --cwd, --dir and an explicit HANDOFF_FILE; auto-selection skips such files.
+overrides (U+202A-U+202E), bidi isolates (U+2066-U+2069) or bidi marks (U+200E,
+U+200F, U+061C) are refused (exit 2) for --cwd, --dir and an explicit
+HANDOFF_FILE; --latest skips such files.
 
 Exit codes: 0 ok, 1 launch failure, 2 usage or handoff error.
 EOF
@@ -143,7 +146,9 @@ detect_term() {
 #   C1 controls U+0080-U+009F (UTF-8 C2 80..C2 9F);
 #   line/paragraph separators and bidi embeddings/overrides U+2028-U+202E
 #     (E2 80 A8..AE);
-#   bidi isolates U+2066-U+2069 (E2 81 A6..A9).
+#   bidi isolates U+2066-U+2069 (E2 81 A6..A9);
+#   bidi marks LRM/RLM U+200E-U+200F (E2 80 8E..8F);
+#   Arabic letter mark U+061C (D8 9C).
 # Plain non-ASCII text (accents, CJK, emoji) is not matched.
 has_ctrl() {
   local LC_ALL=C
@@ -152,6 +157,8 @@ has_ctrl() {
     *$'\xc2'[$'\x80'-$'\x9f']*) return 0 ;;
     *$'\xe2\x80'[$'\xa8'-$'\xae']*) return 0 ;;
     *$'\xe2\x81'[$'\xa6'-$'\xa9']*) return 0 ;;
+    *$'\xe2\x80'[$'\x8e'-$'\x8f']*) return 0 ;;
+    *$'\xd8\x9c'*) return 0 ;;
   esac
   return 1
 }
@@ -180,11 +187,11 @@ find_handoff() {
   FOUND=""
   FIND_ERR=""
   if [ ! -d "$dir" ]; then
-    FIND_ERR="handoff search dir not found: $dir (pass HANDOFF_FILE or use --dir)"
+    FIND_ERR="handoff search dir not found: $(shown "$dir") (pass HANDOFF_FILE or use --dir)"
     return 1
   fi
   if ! canon_dir "$dir"; then
-    FIND_ERR="cannot enter handoff search dir: $dir"
+    FIND_ERR="cannot enter handoff search dir: $(shown "$dir")"
     return 1
   fi
   cdir="$CANON"
@@ -193,12 +200,12 @@ find_handoff() {
     return 1
   fi
   if [ ! -O "$cdir" ]; then
-    FIND_ERR="refusing to auto-select from $cdir: not owned by you (an explicit HANDOFF_FILE is still allowed)"
+    FIND_ERR="refusing to auto-select from $(shown "$cdir"): not owned by you (an explicit HANDOFF_FILE is still allowed)"
     return 1
   fi
   wr="$(find "$cdir" -maxdepth 0 \( -perm -0020 -o -perm -0002 \) -print 2>/dev/null || true)"
   if [ -n "$wr" ]; then
-    FIND_ERR="refusing to auto-select from $cdir: it is group- or world-writable (an explicit HANDOFF_FILE is still allowed)"
+    FIND_ERR="refusing to auto-select from $(shown "$cdir"): it is group- or world-writable (an explicit HANDOFF_FILE is still allowed)"
     return 1
   fi
 
@@ -244,7 +251,7 @@ find_handoff() {
   elif [ -n "$best" ]; then
     FOUND="$best"
   else
-    FIND_ERR="no handoff file found in $cdir (pass HANDOFF_FILE or use --dir)"
+    FIND_ERR="no handoff file found in $(shown "$cdir") (pass HANDOFF_FILE or use --dir)"
     if [ "$skipped" -gt 0 ]; then
       FIND_ERR="$FIND_ERR; $skipped candidate(s) skipped: symlink, not owned by you, or unsafe name"
     fi
@@ -260,7 +267,7 @@ print_fallback() { # print_fallback CMD
 main() {
   local agent="${TIN_CAN_AGENT:-claude}"
   local term="${TIN_CAN_TERM:-auto}"
-  local where="tab" where_given=0 cwd="" dry_run=0
+  local where="tab" where_given=0 cwd="" dry_run=0 latest=0
   local search_dir="${TIN_CAN_DIR:-${HOME:-}/.claude/resume-prompts}"
   local handoff_arg="" have_handoff=0
   local agent_bin repo handoff hd hbase prompt cmd session="" rc err a opt
@@ -296,6 +303,10 @@ main() {
         ;;
       --dry-run)
         dry_run=1
+        shift
+        ;;
+      --latest)
+        latest=1
         shift
         ;;
       --)
@@ -342,8 +353,8 @@ main() {
   if has_ctrl "$cwd"; then
     die 2 "cwd contains a control character; refusing: $(shown "$cwd")"
   fi
-  [ -d "$cwd" ] || die 2 "--cwd is not a directory: $cwd"
-  canon_dir "$cwd" || die 2 "cannot enter --cwd directory: $cwd"
+  [ -d "$cwd" ] || die 2 "--cwd is not a directory: $(shown "$cwd")"
+  canon_dir "$cwd" || die 2 "cannot enter --cwd directory: $(shown "$cwd")"
   cwd="$CANON"
   if has_ctrl "$cwd"; then
     die 2 "cwd contains a control character; refusing: $(shown "$cwd")"
@@ -354,12 +365,19 @@ main() {
     die 2 "handoff search dir contains a control character; refusing: $(shown "$search_dir")"
   fi
 
+  if [ "$latest" -eq 1 ] && [ "$have_handoff" -eq 1 ]; then
+    die 2 "--latest and HANDOFF_FILE are mutually exclusive: pass one or the other"
+  fi
+  if [ "$latest" -eq 0 ] && [ "$have_handoff" -eq 0 ]; then
+    die 2 "no HANDOFF_FILE given (pass the handoff file, or --latest to auto-select the newest one; see --help)"
+  fi
+
   if [ "$have_handoff" -eq 1 ]; then
     if has_ctrl "$handoff_arg"; then
       die 2 "handoff path contains a control character; refusing: $(shown "$handoff_arg")"
     fi
-    [ -f "$handoff_arg" ] || die 2 "handoff is not an existing regular file: $handoff_arg"
-    [ -r "$handoff_arg" ] || die 2 "handoff file is not readable: $handoff_arg"
+    [ -f "$handoff_arg" ] || die 2 "handoff is not an existing regular file: $(shown "$handoff_arg")"
+    [ -r "$handoff_arg" ] || die 2 "handoff file is not readable: $(shown "$handoff_arg")"
     case "$handoff_arg" in
       */*)
         hd="${handoff_arg%/*}"
@@ -368,27 +386,27 @@ main() {
       *) hd="." ;;
     esac
     hbase="${handoff_arg##*/}"
-    canon_dir "$hd" || die 2 "cannot resolve handoff directory: $hd"
+    canon_dir "$hd" || die 2 "cannot resolve handoff directory: $(shown "$hd")"
     hd="$CANON"
     handoff="${CANON%/}/$hbase"
     if has_ctrl "$handoff"; then
       die 2 "handoff path contains a control character; refusing: $(shown "$handoff")"
     fi
-    [ -f "$handoff" ] || die 2 "cannot canonicalise handoff path: $handoff_arg"
+    [ -f "$handoff" ] || die 2 "cannot canonicalise handoff path: $(shown "$handoff_arg")"
     if [ -L "$handoff" ]; then
-      warn "handoff file is a symlink: $handoff"
+      warn "handoff file is a symlink: $(shown "$handoff")"
     fi
     if [ ! -O "$handoff" ]; then
-      warn "handoff file is not owned by you: $handoff"
+      warn "handoff file is not owned by you: $(shown "$handoff")"
     fi
     err="$(find "$hd" -maxdepth 0 \( -perm -0020 -o -perm -0002 \) -print 2>/dev/null || true)"
     if [ -n "$err" ]; then
-      warn "handoff file is in a group- or world-writable directory: $hd"
+      warn "handoff file is in a group- or world-writable directory: $(shown "$hd")"
     fi
   else
     find_handoff "$search_dir" "$repo" || die 2 "$FIND_ERR"
     handoff="$FOUND"
-    printf '%s: using %s\n' "$PROG" "$handoff" >&2
+    printf '%s: using %s\n' "$PROG" "$(shown "$handoff")" >&2
   fi
 
   prompt="Read the handoff file at $handoff and follow its KICKOFF section."
