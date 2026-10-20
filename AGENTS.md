@@ -36,7 +36,7 @@ bin/tin-can --help | awk 'length > 80'        # must print nothing
 
 - In `bin/tin-can`, `hooks/tin-can-hook` and `install.sh`: POSIX `[ ]` tests, not `[[ ]]`. In bats tests, assert with `[[ ... ]] || return 1`. 2-space indent. Quote every expansion.
 - Never interpolate handoff contents into a shell command. Build commands with the existing single-quoting helper.
-- Refuse paths with control, bidi or invisible characters. Keep that behavior when you touch path handling.
+- Refuse paths with the characters listed under "Refused paths" in README.md (controls, bidi, some invisible characters, lookalike spaces). Keep that behavior when you touch path handling.
 - Tests never open a real terminal, start a real agent, or touch the real HOME.
 - `--help` lines stay at or under 80 columns.
 - User-visible changes go in `CHANGELOG.md` under `## [Unreleased]`.

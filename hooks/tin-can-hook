@@ -76,6 +76,8 @@ jq_field() {
 # already exist. Best effort: returns 1 on any problem.
 state_dir() {
   local sid="$1" root base
+  # bash 3.2 in a UTF-8 locale lets [A-Za-z] match non-ASCII letters; check bytes.
+  local LC_ALL=C
   case "$sid" in
     "" | *[!A-Za-z0-9_-]*) return 1 ;;
   esac

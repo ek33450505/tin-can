@@ -159,6 +159,20 @@ run_hook() {
   [ ! -e "$CLAUDE_PLUGIN_DATA/tin-can-hook/$long" ]
 }
 
+# Under bash >= 5 the class is ASCII anyway; this bites under
+# TIN_CAN_TEST_BASH=/bin/bash (macOS bash 3.2), which CI's macOS job runs.
+@test "session_id with non-ASCII letters is refused in a UTF-8 locale" {
+  f="$TIN_CAN_DIR/x.md"
+  echo hi >"$f"
+  for sid in 'abcé' 'aß' 'ａb'; do
+    input="$(mk_input Write "$f" "$sid")"
+    run env LANG=en_US.UTF-8 LC_ALL= "$HOOK_BASH" "$HOOK" post-write <<<"$input"
+    [ "$status" -eq 0 ]
+    [[ "$(echo "$output" | jq -r .systemMessage)" == *"! tin-can '$f'"* ]] || return 1
+  done
+  [ -z "$(find "$CLAUDE_PLUGIN_DATA" -mindepth 1 -print 2>/dev/null)" ]
+}
+
 @test "symlinked state dir: message printed, nothing written through it" {
   f="$TIN_CAN_DIR/x.md"
   echo hi >"$f"

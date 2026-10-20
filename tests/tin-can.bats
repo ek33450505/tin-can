@@ -667,6 +667,35 @@ load helpers
   [[ "$output" == *"tin-can: using $RESUME/older.md"* ]]
 }
 
+@test "trust: candidates whose names contain soft hyphen, ZWSP, word joiner or BOM are skipped even when newest" {
+  local oct name
+  for oct in '\302\255' '\342\200\213' '\342\201\240' '\357\273\277'; do
+    rm -f "$RESUME"/*.md
+    # shellcheck disable=SC2059
+    name="new$(printf "$oct")x.md"
+    printf 'old\n' >"$RESUME/older.md"
+    printf 'x\n' >"$RESUME/$name"
+    set_mtime "$RESUME/older.md" 202601010000
+    set_mtime "$RESUME/$name" 202601050000
+    run_tc --latest --cwd "$TEST_ROOT" --term print
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"tin-can: using $RESUME/older.md"* ]] || return 1
+  done
+}
+
+@test "invisible characters: an explicit handoff file containing one is refused" {
+  local oct name
+  for oct in '\302\255' '\342\200\213' '\342\201\240' '\357\273\277'; do
+    # shellcheck disable=SC2059
+    name="a$(printf "$oct")b.md"
+    printf 'x\n' >"$TEST_ROOT/$name"
+    run_tc --term print --cwd "$WORK" "$TEST_ROOT/$name"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"control character"* ]] || return 1
+    [ "$(total_calls)" -eq 0 ] || return 1
+  done
+}
+
 @test "lookalike spaces and tag characters are refused as 'control' errors" {
   local n
   for n in "$(printf 'x\342\200\201y')" "$(printf 'x\343\200\200y')" \
@@ -1015,10 +1044,11 @@ find_dash() {
 
 @test "unicode controls: ordinary non-ASCII near the refused ranges is accepted" {
   # U+00A1 (C2 A1), U+00C1 (C3 81), U+2030 (E2 80 B0), U+2064 (E2 81 A4),
-  # U+2060 (E2 81 A0), U+206A (E2 81 AA), emoji (F0 9F 98 80)
+  # U+2061 (E2 81 A1), U+206A (E2 81 AA), ZWJ U+200D (E2 80 8D), emoji
+  # (F0 9F 98 80)
   roundtrip "$(printf 'nb\302\241sp')" "$(printf 'c\303\201.md')"
   roundtrip "$(printf 'nn\342\200\260sp')" "$(printf 'u\342\201\244.md')"
-  roundtrip "$(printf 'wj\342\201\240sp')" "$(printf 'z\342\200\215w.md')"
+  roundtrip "$(printf 'fa\342\201\241sp')" "$(printf 'z\342\200\215w.md')"
   roundtrip "$(printf 'e\342\201\252x')" "$(printf 'smile \360\237\230\200.md')"
 }
 
@@ -1030,8 +1060,9 @@ find_dash() {
   local oct raw
   for oct in '\342\200\247' '\342\201\245' '\342\201\252' \
     '\302\241' '\303\201' '\342\200\215' '\342\200\220' '\330\233' '\330\235' \
-    '\341\277\277' '\342\200\213' '\342\200\260' '\342\201\236' '\342\201\240' \
-    '\342\277\277' '\343\200\201' '\363\237\277\277' '\363\240\202\200'; do
+    '\341\277\277' '\342\200\214' '\342\200\260' '\342\201\236' '\342\201\241' \
+    '\342\277\277' '\343\200\201' '\363\237\277\277' '\363\240\202\200' \
+    '\302\254' '\302\256' '\357\273\276' '\357\274\200'; do
     # shellcheck disable=SC2059
     raw="$(printf "$oct")"
     run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print --cwd "$TEST_ROOT/no-such/a${raw}b" "$HF"
@@ -1052,6 +1083,8 @@ find_dash() {
     "$(printf '\342\200\216')" "$(printf '\342\200\217')" "$(printf '\330\234')" \
     "$(printf '\302\240')" "$(printf '\342\200\200')" "$(printf '\342\200\212')" \
     "$(printf '\342\200\257')" "$(printf '\342\201\237')" "$(printf '\343\200\200')" \
+    "$(printf '\302\255')" "$(printf '\342\200\213')" "$(printf '\342\201\240')" \
+    "$(printf '\357\273\277')" \
     "$(printf '\363\240\200\200')" "$(printf '\363\240\201\277')"; do
     run_tc --term print --cwd "$TEST_ROOT/no-such/a${n}b" "$HF"
     [ "$status" -eq 2 ]
@@ -1073,40 +1106,40 @@ find_dash() {
   done
 }
 
-# ZWSP (U+200B) is not refused by has_ctrl, so it reaches the path error and
+# ZWJ (U+200D) is not refused by has_ctrl, so it reaches the path error and
 # warning messages, which must show it escaped via shown(), never raw.
-@test "path in error: --cwd not a directory shows ZWSP escaped (UTF-8 locale)" {
-  local z; z="$(printf '\342\200\213')"
+@test "path in error: --cwd not a directory shows ZWJ escaped (UTF-8 locale)" {
+  local z; z="$(printf '\342\200\215')"
   run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print --cwd "$TEST_ROOT/no-such/a${z}b" "$HF"
   [ "$status" -eq 2 ]
   [[ "$output" == *"--cwd is not a directory"* ]]
   [[ "$output" != *"$z"* ]]
-  [[ "$output" == *'\342\200\213'* ]]
+  [[ "$output" == *'\342\200\215'* ]]
   [ "$(total_calls)" -eq 0 ]
 }
 
-@test "path in error: handoff not a regular file shows ZWSP escaped (UTF-8 locale)" {
-  local z; z="$(printf '\342\200\213')"
+@test "path in error: handoff not a regular file shows ZWJ escaped (UTF-8 locale)" {
+  local z; z="$(printf '\342\200\215')"
   run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print "$TEST_ROOT/no-such/h${z}.md"
   [ "$status" -eq 2 ]
   [[ "$output" == *"handoff is not an existing regular file"* ]]
   [[ "$output" != *"$z"* ]]
-  [[ "$output" == *'\342\200\213'* ]]
+  [[ "$output" == *'\342\200\215'* ]]
   [ "$(total_calls)" -eq 0 ]
 }
 
-@test "path in error: --dir not found shows ZWSP escaped (UTF-8 locale)" {
-  local z; z="$(printf '\342\200\213')"
+@test "path in error: --dir not found shows ZWJ escaped (UTF-8 locale)" {
+  local z; z="$(printf '\342\200\215')"
   run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print --latest --dir "$TEST_ROOT/no-such/d${z}"
   [ "$status" -eq 2 ]
   [[ "$output" == *"handoff search dir not found"* ]]
   [[ "$output" != *"$z"* ]]
-  [[ "$output" == *'\342\200\213'* ]]
+  [[ "$output" == *'\342\200\215'* ]]
   [ "$(total_calls)" -eq 0 ]
 }
 
-@test "path in warning: symlink handoff warning shows ZWSP escaped (UTF-8 locale)" {
-  local z line found=0; z="$(printf '\342\200\213')"
+@test "path in warning: symlink handoff warning shows ZWJ escaped (UTF-8 locale)" {
+  local z line found=0; z="$(printf '\342\200\215')"
   mkdir -p "$TEST_ROOT/zw"
   chmod 700 "$TEST_ROOT/zw"
   ln -s "$HF" "$TEST_ROOT/zw/s${z}.md"
@@ -1117,14 +1150,14 @@ find_dash() {
     if [[ "$line" == *"handoff file is a symlink:"* ]]; then
       found=1
       [[ "$line" != *"$z"* ]]
-      [[ "$line" == *'\342\200\213'* ]]
+      [[ "$line" == *'\342\200\215'* ]]
     fi
   done <<< "$output"
   [ "$found" -eq 1 ]
 }
 
-@test "path in warning: world-writable handoff dir warning shows ZWSP escaped (UTF-8 locale)" {
-  local z line found=0; z="$(printf '\342\200\213')"
+@test "path in warning: world-writable handoff dir warning shows ZWJ escaped (UTF-8 locale)" {
+  local z line found=0; z="$(printf '\342\200\215')"
   mkdir -p "$TEST_ROOT/ww${z}d"
   printf 'x\n' >"$TEST_ROOT/ww${z}d/ok.md"
   chmod 777 "$TEST_ROOT/ww${z}d"
@@ -1134,39 +1167,39 @@ find_dash() {
     if [[ "$line" == *"group- or world-writable directory"* ]]; then
       found=1
       [[ "$line" != *"$z"* ]]
-      [[ "$line" == *'\342\200\213'* ]]
+      [[ "$line" == *'\342\200\215'* ]]
     fi
   done <<< "$output"
   [ "$found" -eq 1 ]
 }
 
-@test "path in error: no handoff file found shows ZWSP escaped (UTF-8 locale)" {
-  local z; z="$(printf '\342\200\213')"
+@test "path in error: no handoff file found shows ZWJ escaped (UTF-8 locale)" {
+  local z; z="$(printf '\342\200\215')"
   mkdir -p "$TEST_ROOT/e${z}d"
   chmod 755 "$TEST_ROOT/e${z}d"
   run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print --latest --dir "$TEST_ROOT/e${z}d"
   [ "$status" -eq 2 ]
   [[ "$output" == *"no handoff file found in"* ]]
   [[ "$output" != *"$z"* ]]
-  [[ "$output" == *'\342\200\213'* ]]
+  [[ "$output" == *'\342\200\215'* ]]
   [ "$(total_calls)" -eq 0 ]
 }
 
-@test "path in error: unreadable handoff shows ZWSP escaped (UTF-8 locale)" {
+@test "path in error: unreadable handoff shows ZWJ escaped (UTF-8 locale)" {
   if [ "$(id -u)" -eq 0 ]; then skip "root can read anything"; fi
-  local z; z="$(printf '\342\200\213')"
+  local z; z="$(printf '\342\200\215')"
   printf 'x\n' >"$TEST_ROOT/h${z}.md"
   chmod 000 "$TEST_ROOT/h${z}.md"
   run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print "$TEST_ROOT/h${z}.md"
   [ "$status" -eq 2 ]
   [[ "$output" == *"not readable"* ]]
   [[ "$output" != *"$z"* ]]
-  [[ "$output" == *'\342\200\213'* ]]
+  [[ "$output" == *'\342\200\215'* ]]
   [ "$(total_calls)" -eq 0 ]
 }
 
-@test "path in report: auto-select 'using' line shows ZWSP escaped (UTF-8 locale)" {
-  local z line found=0; z="$(printf '\342\200\213')"
+@test "path in report: auto-select 'using' line shows ZWJ escaped (UTF-8 locale)" {
+  local z line found=0; z="$(printf '\342\200\215')"
   printf 'x\n' >"$RESUME/n${z}.md"
   run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print --latest
   [ "$status" -eq 0 ]
@@ -1174,7 +1207,7 @@ find_dash() {
     if [[ "$line" == "tin-can: using "* ]]; then
       found=1
       [[ "$line" != *"$z"* ]]
-      [[ "$line" == *'\342\200\213'* ]]
+      [[ "$line" == *'\342\200\215'* ]]
     fi
   done <<< "$output"
   [ "$found" -eq 1 ]
@@ -1222,7 +1255,7 @@ raw_path_sites() {
 }
 
 @test "dry-run: non-ASCII cwd is escaped, command stays raw, note on stderr (UTF-8 locale)" {
-  local z; z="$(printf '\342\200\213')"
+  local z; z="$(printf '\342\200\215')"
   mkdir -p "$TEST_ROOT/work/a${z}b"
   run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "CMUX_WORKSPACE_ID=ws-1" "$TC_BASH" "$TC" --term cmux --where window --dry-run --cwd "$TEST_ROOT/work/a${z}b" "$HF"
   [ "$status" -eq 0 ]
@@ -1230,7 +1263,7 @@ raw_path_sites() {
   cwdline="$(printf '%s\n' "$output" | grep '^  cwd:')"
   launchline="$(printf '%s\n' "$output" | grep '^  launch:')"
   cmdline="$(printf '%s\n' "$output" | grep '^  command:')"
-  [[ "$cwdline" == *'\342\200\213'* ]] || return 1
+  [[ "$cwdline" == *'\342\200\215'* ]] || return 1
   [[ "$cwdline" != *"$z"* ]] || return 1
   [[ "$launchline" == *"--cwd"* ]] || return 1
   [[ "$launchline" != *"$z"* ]] || return 1
@@ -1239,7 +1272,7 @@ raw_path_sites() {
 }
 
 @test "print: non-ASCII cwd notes on stderr, stdout is exactly the command" {
-  local z out err; z="$(printf '\342\200\213')"
+  local z out err; z="$(printf '\342\200\215')"
   mkdir -p "$TEST_ROOT/work/a${z}b"
   out="$(env "PATH=$TC_PATH" "$TC_BASH" "$TC" --term print --cwd "$TEST_ROOT/work/a${z}b" "$HF" 2>"$TEST_ROOT/err")"
   err="$(cat "$TEST_ROOT/err")"
@@ -1428,13 +1461,13 @@ raw_path_sites() {
   [ "$(total_calls)" -eq 0 ]
 }
 
-@test "list: a file name with ZWSP is shown escaped, never raw" {
+@test "list: a file name with ZWJ is shown escaped, never raw" {
   local z
-  z="$(printf '\342\200\213')"
+  z="$(printf '\342\200\215')"
   printf 'x\n' >"$RESUME/a${z}b.md"
   run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --list --cwd "$WORK" --term print
   [ "$status" -eq 0 ]
-  [[ "$output" == *'\342\200\213'* ]] || return 1
+  [[ "$output" == *'\342\200\215'* ]] || return 1
   [[ "$output" != *"$z"* ]]
 }
 

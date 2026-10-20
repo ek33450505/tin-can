@@ -87,7 +87,7 @@ Installing the plugin means Claude Code runs `hooks/tin-can-hook` automatically,
 Install the binary first with `./install.sh --no-skill` (see Install above; the `! tin-can` line the hooks print needs `tin-can` on your shell's `PATH`). Then add the plugin, pinned to a release tag (recommended):
 
 ```
-/plugin marketplace add ek33450505/tin-can#v0.2.0
+/plugin marketplace add ek33450505/tin-can#v0.2.1
 /plugin install tin-can@tin-can
 ```
 
@@ -146,9 +146,10 @@ A path containing any of the following is refused with exit 2 when it is given e
 - bidirectional isolates (U+2066-U+2069)
 - the left-to-right, right-to-left and Arabic letter marks (U+200E, U+200F, U+061C)
 - Unicode tag characters (U+E0000-U+E007F)
+- invisible characters: soft hyphen (U+00AD), zero-width space (U+200B), word joiner (U+2060) and zero-width no-break space (U+FEFF)
 - lookalike spaces (U+00A0, U+2000-U+200A, U+202F, U+205F, U+3000)
 
-Other non-ASCII text (letters with accents, CJK ideographs, emoji) is accepted.
+Other non-ASCII text (letters with accents, CJK ideographs, emoji) is accepted, including the zero-width joiner and non-joiner (U+200D, U+200C), which emoji sequences and some scripts need.
 
 ## Supported terminals and agents
 
