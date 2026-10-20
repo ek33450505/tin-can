@@ -146,10 +146,10 @@ A path containing any of the following is refused with exit 2 when it is given e
 - bidirectional isolates (U+2066-U+2069)
 - the left-to-right, right-to-left and Arabic letter marks (U+200E, U+200F, U+061C)
 - Unicode tag characters (U+E0000-U+E007F)
-- invisible characters: soft hyphen (U+00AD), zero-width space (U+200B), word joiner (U+2060) and zero-width no-break space (U+FEFF)
+- invisible characters: soft hyphen (U+00AD), zero-width space (U+200B), word joiner (U+2060), zero-width no-break space (U+FEFF), Hangul fillers (U+115F, U+1160, U+3164, U+FFA0), Mongolian vowel separator (U+180E) and the variation selectors supplement (U+E0100-U+E01FF)
 - lookalike spaces (U+00A0, U+2000-U+200A, U+202F, U+205F, U+3000)
 
-Other non-ASCII text (letters with accents, CJK ideographs, emoji) is accepted, including the zero-width joiner and non-joiner (U+200D, U+200C), which emoji sequences and some scripts need.
+Other non-ASCII text (letters with accents, CJK ideographs, emoji) is accepted, including the zero-width joiner and non-joiner (U+200D, U+200C) and the variation selectors U+FE00-U+FE0F, which emoji sequences and some scripts need.
 
 ## Supported terminals and agents
 
@@ -184,6 +184,7 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 - The directory check uses POSIX permission bits and ownership only. It does not see macOS ACLs (an `ls -ld` entry ending in `+`) or other extended access controls.
 - Newest means newest modification time; files with equal times are taken in file-name order.
+- Some blank-looking characters are still accepted in paths, for example U+2800 (Braille pattern blank), U+1680 (Ogham space mark) and U+206A-U+206F. They cannot inject terminal or shell text, and displayed paths show them escaped, but two names can look alike: check the escaped path in `--dry-run` or `--list` output.
 - Processes running as your own user, including a compromised agent, can still plant a file you own in the handoff directory. Ownership checks do not help there: review the file with `--latest --dry-run` before launching.
 - The "not owned by you" paths are not covered by tests (see Development).
 

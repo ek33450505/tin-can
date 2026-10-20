@@ -436,7 +436,7 @@ mk_ahead_repo() {
   mk_repo r dirty
   shim="$TEST_ROOT/shim"
   mkdir "$shim"
-  for t in cat jq rm mkdir dirname mktemp mv wc; do
+  for t in cat tr jq rm mkdir dirname mktemp mv wc; do
     ln -s "$(command -v "$t")" "$shim/$t"
   done
   run_prompt "wrap up"
@@ -496,4 +496,113 @@ mk_ahead_repo() {
   run_stop "$TEST_ROOT/bad"$'\n'"name"
   reason="$(echo "$output" | jq -r .reason)"
   [[ "$reason" == *"in repo 'bad?name')"* ]] || return 1
+}
+
+# ---- NUL in input -----------------------------------------------------------
+# Command substitution drops NUL, so "a\u0000b" would read back as "ab". The
+# hook rejects any input with a NUL in a string or key. The JSON text carries a
+# literal \u0000 escape, since bash cannot hold a NUL byte.
+
+@test "NUL in session_id: nothing printed, no state; same input without NUL works" {
+  f="$TIN_CAN_DIR/2026-01-01-x-next.md"
+  echo hi >"$f"
+  input='{"session_id":"a\u0000b","hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"file_path":"'"$f"'"}}'
+  run "$HOOK_BASH" "$HOOK" post-write <<<"$input"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || return 1
+  [ -z "$(find "$CLAUDE_PLUGIN_DATA" -mindepth 1 -print 2>/dev/null)" ]
+  input='{"session_id":"ab","hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"file_path":"'"$f"'"}}'
+  run "$HOOK_BASH" "$HOOK" post-write <<<"$input"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"tin-can: handoff written"* ]] || return 1
+}
+
+@test "NUL in tool_input.file_path: nothing printed" {
+  f="$TIN_CAN_DIR/2026-01-01-x-next.md"
+  echo hi >"$f"
+  input='{"session_id":"sess1","hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"file_path":"'"$f"'\u0000"}}'
+  run "$HOOK_BASH" "$HOOK" post-write <<<"$input"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || return 1
+  [ -z "$(find "$CLAUDE_PLUGIN_DATA" -mindepth 1 -print 2>/dev/null)" ]
+  input='{"session_id":"sess1","hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"file_path":"'"$f"'"}}'
+  run "$HOOK_BASH" "$HOOK" post-write <<<"$input"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"tin-can: handoff written"* ]] || return 1
+}
+
+@test "NUL in an object key: nothing printed" {
+  f="$TIN_CAN_DIR/2026-01-01-x-next.md"
+  echo hi >"$f"
+  input='{"session_id":"sess1","x\u0000y":1,"tool_name":"Write","tool_input":{"file_path":"'"$f"'"}}'
+  run "$HOOK_BASH" "$HOOK" post-write <<<"$input"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || return 1
+  input='{"session_id":"sess1","xy":1,"tool_name":"Write","tool_input":{"file_path":"'"$f"'"}}'
+  run "$HOOK_BASH" "$HOOK" post-write <<<"$input"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"tin-can: handoff written"* ]] || return 1
+}
+
+@test "NUL in the first of several JSON documents: nothing printed, no state" {
+  f="$TIN_CAN_DIR/2026-01-01-x-next.md"
+  echo hi >"$f"
+  input='{"session_id":"a\u0000b","hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"file_path":"'"$f"'"}} {"x":1}'
+  run "$HOOK_BASH" "$HOOK" post-write <<<"$input"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || return 1
+  [ -z "$(find "$CLAUDE_PLUGIN_DATA" -mindepth 1 -print 2>/dev/null)" ]
+  # control: the same documents without NUL print the message
+  input='{"session_id":"ab","hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"file_path":"'"$f"'"}} {"x":1}'
+  run "$HOOK_BASH" "$HOOK" post-write <<<"$input"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"! tin-can"* ]] || return 1
+}
+
+@test "NUL in the last of several JSON documents: nothing printed, no state" {
+  f="$TIN_CAN_DIR/2026-01-01-x-next.md"
+  echo hi >"$f"
+  input='{"session_id":"ab","hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"file_path":"'"$f"'"}} {"session_id":"a\u0000b"}'
+  run "$HOOK_BASH" "$HOOK" post-write <<<"$input"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || return 1
+  [ -z "$(find "$CLAUDE_PLUGIN_DATA" -mindepth 1 -print 2>/dev/null)" ]
+}
+
+@test "raw NUL byte in the input: nothing printed, no state" {
+  f="$TIN_CAN_DIR/2026-01-01-x-next.md"
+  echo hi >"$f"
+  printf '{"session_id":"a\000b","hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"file_path":"%s"}}' "$f" >"$TEST_ROOT/nul.json"
+  run "$HOOK_BASH" "$HOOK" post-write <"$TEST_ROOT/nul.json"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || return 1
+  [ -z "$(find "$CLAUDE_PLUGIN_DATA" -mindepth 1 -print 2>/dev/null)" ]
+  # control: the same bytes without the NUL (session "ab") print the message
+  printf '{"session_id":"ab","hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"file_path":"%s"}}' "$f" >"$TEST_ROOT/ok.json"
+  run "$HOOK_BASH" "$HOOK" post-write <"$TEST_ROOT/ok.json"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"! tin-can"* ]] || return 1
+}
+
+@test "NUL in prompt session_id: nothing printed, no state" {
+  run "$HOOK_BASH" "$HOOK" prompt <<<'{"session_id":"a\u0000b","prompt":"wrap up"}'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || return 1
+  [ -z "$(find "$CLAUDE_PLUGIN_DATA" -mindepth 1 -print 2>/dev/null)" ]
+}
+
+@test "NUL in stop cwd or last_assistant_message: nothing printed" {
+  mk_repo r dirty
+  run_prompt "wrap up"
+  input='{"session_id":"sess1","cwd":"'"$TEST_ROOT"'/r\u0000","stop_hook_active":false,"last_assistant_message":""}'
+  run "$HOOK_BASH" "$HOOK" stop <<<"$input"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || return 1
+  input='{"session_id":"sess1","cwd":"'"$TEST_ROOT"'/r","stop_hook_active":false,"last_assistant_message":"x\u0000y"}'
+  run "$HOOK_BASH" "$HOOK" stop <<<"$input"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || return 1
+  # control: the same input without NUL blocks the stop
+  run_stop "$TEST_ROOT/r"
+  [ -n "$output" ] || return 1
 }

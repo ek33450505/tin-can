@@ -243,7 +243,20 @@ post_write() {
 main() {
   [ "${TIN_CAN_HOOKS:-1}" = 0 ] && return 0
   command -v jq >/dev/null 2>&1 || return 0
-  INPUT="$(cat 2>/dev/null || true)"
+  # Bash command substitution drops NUL bytes silently, so "a<NUL>b" would
+  # read back as "ab" (colliding with a real session "ab"). A raw NUL on
+  # stdin is mapped to 0x01, which is invalid JSON, so jq fails to parse and
+  # the hook exits silently. An escaped \u0000 is found by the explode check
+  # (explode compares code points). If cat or tr fails, INPUT is empty and
+  # every event exits silently. The per-field checks (state_dir, tin-can
+  # --dry-run) remain the real control; this guard is defense in depth.
+  # jq -se: -e makes the exit status reflect the result; -s checks every
+  # top-level document, not just the last.
+  INPUT="$({ cat | tr '\000' '\001'; } 2>/dev/null || true)"
+  [ -n "$INPUT" ] || return 0
+  printf '%s' "$INPUT" | jq -se \
+    '[.. | (strings, (objects | keys[])) | explode | any(. == 0)] | any | not' \
+    >/dev/null 2>&1 || return 0
   case "${1:-}" in
     post-write) post_write ;;
     prompt) prompt_event ;;

@@ -7,15 +7,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 ## [0.2.1] — 2026-10-20
 
 ### Changed
-- **Behavior change:** paths containing the soft hyphen (U+00AD), zero-width space (U+200B), word joiner (U+2060) or zero-width no-break space (U+FEFF), which were accepted before, are now refused like the other disguising characters: exit 2 when given explicitly, skipped when they are only an auto-selection candidate. The zero-width joiner and non-joiner (U+200D, U+200C) are still accepted, because emoji sequences and some scripts need them.
+- **Behavior change:** paths containing these characters, which were accepted before, are now refused like the other disguising characters: exit 2 when given explicitly, skipped when they are only an auto-selection candidate.
+  - the soft hyphen (U+00AD), zero-width space (U+200B), word joiner (U+2060) and zero-width no-break space (U+FEFF);
+  - the Hangul fillers (U+115F, U+1160, U+3164, U+FFA0) and the Mongolian vowel separator (U+180E);
+  - the variation selectors supplement (U+E0100-U+E01EF) and the unassigned U+E01F0-U+E01FF after it.
+
+  The zero-width joiner and non-joiner (U+200D, U+200C) and the variation selectors U+FE00-U+FE0F are still accepted, because emoji sequences and some scripts need them.
 - README reorganised: quick start, example output, how it works, FAQ. The release history moved here from the README.
 - `AGENTS.md` at the repository root now holds instructions for contributors. If you copied or linked the snippet for your own `AGENTS.md`, it is now `docs/agents-snippet.md`.
 
 ### Added
-- CHANGELOG.md, CONTRIBUTING.md, SECURITY.md, CODE_OF_CONDUCT.md, issue and pull request templates, and contributor instructions in AGENTS.md, imported by `.claude/CLAUDE.md` (the snippet for your own AGENTS.md moved to docs/agents-snippet.md).
+- CHANGELOG.md, CONTRIBUTING.md, SECURITY.md, CODE_OF_CONDUCT.md, issue and pull request templates, and contributor instructions in AGENTS.md, imported by `.claude/CLAUDE.md`.
 
 ### Fixed
 - The plugin hook checks session ids byte by byte. Under macOS's bash 3.2 in a UTF-8 locale it accepted ids containing non-ASCII letters such as `é` and created state directories with those names.
+- The plugin hook ignores input containing a NUL character, raw or escaped as `\u0000`. The shell dropped the NUL when reading a field, so a session id `a\u0000b` was read as `ab`.
 
 ## [0.2.0] — 2026-10-20
 

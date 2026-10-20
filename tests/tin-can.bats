@@ -667,9 +667,10 @@ load helpers
   [[ "$output" == *"tin-can: using $RESUME/older.md"* ]]
 }
 
-@test "trust: candidates whose names contain soft hyphen, ZWSP, word joiner or BOM are skipped even when newest" {
+@test "trust: candidates whose names contain soft hyphen, ZWSP, word joiner, BOM, fillers or supplement variation selectors are skipped even when newest" {
   local oct name
-  for oct in '\302\255' '\342\200\213' '\342\201\240' '\357\273\277'; do
+  for oct in '\302\255' '\342\200\213' '\342\201\240' '\357\273\277' \
+    '\341\205\237' '\341\240\216' '\343\205\244' '\357\276\240' '\363\240\204\200'; do
     rm -f "$RESUME"/*.md
     # shellcheck disable=SC2059
     name="new$(printf "$oct")x.md"
@@ -683,9 +684,10 @@ load helpers
   done
 }
 
-@test "invisible characters: an explicit handoff file containing one is refused" {
+@test "invisible characters: an explicit handoff file containing one (incl. fillers, supplement variation selectors) is refused" {
   local oct name
-  for oct in '\302\255' '\342\200\213' '\342\201\240' '\357\273\277'; do
+  for oct in '\302\255' '\342\200\213' '\342\201\240' '\357\273\277' \
+    '\341\205\237' '\341\240\216' '\343\205\244' '\357\276\240' '\363\240\204\200'; do
     # shellcheck disable=SC2059
     name="a$(printf "$oct")b.md"
     printf 'x\n' >"$TEST_ROOT/$name"
@@ -1050,6 +1052,9 @@ find_dash() {
   roundtrip "$(printf 'nn\342\200\260sp')" "$(printf 'u\342\201\244.md')"
   roundtrip "$(printf 'fa\342\201\241sp')" "$(printf 'z\342\200\215w.md')"
   roundtrip "$(printf 'e\342\201\252x')" "$(printf 'smile \360\237\230\200.md')"
+  # NFD Korean (U+1112 U+1161 U+11AB) and emoji + U+FE0F must stay accepted
+  roundtrip "$(printf 'k\341\204\222\341\205\241\341\206\253r')" "$(printf 'h\341\204\222\341\205\241.md')"
+  roundtrip "$(printf 'love\342\235\244\357\270\217x')" "$(printf 'heart\342\235\244\357\270\217.md')"
 }
 
 @test "unicode controls: boundary characters just outside the refused ranges are not 'control' errors" {
@@ -1062,7 +1067,10 @@ find_dash() {
     '\302\241' '\303\201' '\342\200\215' '\342\200\220' '\330\233' '\330\235' \
     '\341\277\277' '\342\200\214' '\342\200\260' '\342\201\236' '\342\201\241' \
     '\342\277\277' '\343\200\201' '\363\237\277\277' '\363\240\202\200' \
-    '\302\254' '\302\256' '\357\273\276' '\357\274\200'; do
+    '\302\254' '\302\256' '\357\273\276' '\357\274\200' \
+    '\341\205\236' '\341\205\241' '\341\240\215' '\341\240\217' \
+    '\343\205\243' '\343\205\245' '\357\276\237' '\357\276\241' \
+    '\363\240\203\277' '\363\240\210\200' '\357\270\217'; do
     # shellcheck disable=SC2059
     raw="$(printf "$oct")"
     run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print --cwd "$TEST_ROOT/no-such/a${raw}b" "$HF"
@@ -1085,7 +1093,10 @@ find_dash() {
     "$(printf '\342\200\257')" "$(printf '\342\201\237')" "$(printf '\343\200\200')" \
     "$(printf '\302\255')" "$(printf '\342\200\213')" "$(printf '\342\201\240')" \
     "$(printf '\357\273\277')" \
-    "$(printf '\363\240\200\200')" "$(printf '\363\240\201\277')"; do
+    "$(printf '\363\240\200\200')" "$(printf '\363\240\201\277')" \
+    "$(printf '\341\205\237')" "$(printf '\341\205\240')" "$(printf '\341\240\216')" \
+    "$(printf '\343\205\244')" "$(printf '\357\276\240')" \
+    "$(printf '\363\240\204\200')" "$(printf '\363\240\207\257')" "$(printf '\363\240\207\277')"; do
     run_tc --term print --cwd "$TEST_ROOT/no-such/a${n}b" "$HF"
     [ "$status" -eq 2 ]
     [[ "$output" == *"control character"* ]]
