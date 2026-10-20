@@ -1320,3 +1320,142 @@ raw_path_sites() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"does not look like it belongs to"* ]]
 }
+
+# --- --list --------------------------------------------------------------------
+
+@test "list: newest first, * on the --latest pick, + on repo-named files" {
+  printf 'a\n' >"$RESUME/2026-01-03-other.md"
+  printf 'b\n' >"$RESUME/2026-01-02-myrepo-next.md"
+  printf 'c\n' >"$RESUME/2026-01-01-zeta.md"
+  set_mtime "$RESUME/2026-01-03-other.md" 202601030000
+  set_mtime "$RESUME/2026-01-02-myrepo-next.md" 202601020000
+  set_mtime "$RESUME/2026-01-01-zeta.md" 202601010000
+  run_tc --list --cwd "$WORK" --term print
+  [ "$status" -eq 0 ]
+  [[ "${lines[0]}" == *"newest first (* = --latest would pick it, + = named for myrepo)" ]] || return 1
+  [ "${lines[1]}" = "    2026-01-03-other.md" ]
+  [ "${lines[2]}" = "* + 2026-01-02-myrepo-next.md" ]
+  [ "${lines[3]}" = "    2026-01-01-zeta.md" ]
+  [ "${#lines[@]}" -eq 4 ]
+  [ "$(total_calls)" -eq 0 ]
+}
+
+@test "list: the * mark names the file --latest picks (repo match and none)" {
+  local cwd
+  printf 'a\n' >"$RESUME/new-other.md"
+  printf 'b\n' >"$RESUME/old-myrepo.md"
+  set_mtime "$RESUME/new-other.md" 202601030000
+  set_mtime "$RESUME/old-myrepo.md" 202601010000
+  for cwd in "$WORK" "$TEST_ROOT"; do
+    run_tc --list --cwd "$cwd" --term print
+    [ "$status" -eq 0 ]
+    local star="" l stars=0
+    for l in "${lines[@]}"; do
+      if [[ "$l" == "* "* ]]; then
+        star="${l:4}"
+        stars=$((stars + 1))
+      fi
+    done
+    [ "$stars" -eq 1 ]
+    run_tc --latest --dry-run --cwd "$cwd" --term print
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"tin-can: using $RESUME/$star"* ]] || return 1
+  done
+}
+
+@test "list: shows at most 10 files then '... and N more'" {
+  local i
+  for i in 01 02 03 04 05 06 07 08 09 10 11 12; do
+    printf 'x\n' >"$RESUME/f$i.md"
+    set_mtime "$RESUME/f$i.md" "2026010100$i"
+  done
+  run_tc --list --cwd "$TEST_ROOT" --term print
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 12 ]
+  [ "${lines[11]}" = "  ... and 2 more" ]
+  [[ "${lines[1]}" == "* "*f12.md ]]
+}
+
+@test "list: skipped counts separate by-name from unsafe" {
+  printf 'x\n' >"$RESUME/real.md"
+  printf 'x\n' >"$RESUME/superseded-a.md"
+  printf 'x\n' >"$RESUME/_b.md"
+  printf 'x\n' >"$RESUME/c-auto.md"
+  printf 'x\n' >"$TEST_ROOT/target.md"
+  ln -s "$TEST_ROOT/target.md" "$RESUME/link.md"
+  run_tc --list --cwd "$TEST_ROOT" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"skipped: 3 by name (superseded-*, _*, *-auto.md); 1 unsafe (symlink, not owned by you, or unsafe name)"* ]] || return 1
+  [[ "$output" != *"c-auto.md"* ]] || return 1
+  [[ "$output" != *"link.md"* ]] || return 1
+}
+
+@test "list: equal modification times are listed in file-name order" {
+  printf 'a\n' >"$RESUME/a.md"
+  printf 'b\n' >"$RESUME/b.md"
+  set_mtime "$RESUME/a.md" 202610010000
+  set_mtime "$RESUME/b.md" 202610010000
+  run_tc --list --cwd "$TEST_ROOT" --term print
+  [ "$status" -eq 0 ]
+  [ "${lines[1]}" = "*   a.md" ]
+  [ "${lines[2]}" = "    b.md" ]
+}
+
+@test "list: no candidates prints (no candidates) and exits 0" {
+  run_tc --list --cwd "$TEST_ROOT" --term print
+  [ "$status" -eq 0 ]
+  [ "${lines[1]}" = "(no candidates)" ]
+  [ "${#lines[@]}" -eq 2 ]
+}
+
+@test "list: a world-writable search dir is refused like --latest" {
+  printf 'x\n' >"$RESUME/real.md"
+  chmod 777 "$RESUME"
+  run_tc --list --cwd "$WORK" --term print
+  chmod 755 "$RESUME"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"group- or world-writable"* ]]
+}
+
+@test "list: combining --list with a file or --latest exits 2" {
+  printf 'x\n' >"$RESUME/real.md"
+  run_tc --list "$RESUME/real.md" --cwd "$WORK" --term print
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--list cannot be combined"* ]] || return 1
+  run_tc --list --latest --cwd "$WORK" --term print
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--list cannot be combined"* ]] || return 1
+  [ "$(total_calls)" -eq 0 ]
+}
+
+@test "list: a file name with ZWSP is shown escaped, never raw" {
+  local z
+  z="$(printf '\342\200\213')"
+  printf 'x\n' >"$RESUME/a${z}b.md"
+  run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --list --cwd "$WORK" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'\342\200\213'* ]] || return 1
+  [[ "$output" != *"$z"* ]]
+}
+
+@test "list: the --latest pick is shown once even when older than the newest 10" {
+  local i
+  for i in 01 02 03 04 05 06 07 08 09 10 11; do
+    printf 'x\n' >"$RESUME/f$i.md"
+    set_mtime "$RESUME/f$i.md" "2026010100$i"
+  done
+  printf 'x\n' >"$RESUME/oldest-myrepo.md"
+  set_mtime "$RESUME/oldest-myrepo.md" 202501010000
+  run_tc --list --cwd "$WORK" --term print
+  [ "$status" -eq 0 ]
+  local l stars=0
+  for l in "${lines[@]}"; do
+    if [[ "$l" == "* "* ]]; then stars=$((stars + 1)); fi
+  done
+  [ "$stars" -eq 1 ]
+  [ "${lines[1]}" = "    f11.md" ]
+  [ "${lines[10]}" = "    f02.md" ]
+  [ "${lines[11]}" = "* + oldest-myrepo.md" ]
+  [ "${lines[12]}" = "  ... and 1 more" ]
+  [ "${#lines[@]}" -eq 13 ]
+}

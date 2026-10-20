@@ -56,6 +56,7 @@ usage() {
   cat <<EOF
 Usage: tin-can [options] HANDOFF_FILE
        tin-can [options] --latest
+       tin-can [options] --list
 
 Open a fresh AI coding session in a new terminal tab/window and tell it to
 read a handoff file. The only thing passed to the agent is one prompt naming
@@ -71,6 +72,7 @@ Options:
   --dir DIR        handoff search directory for --latest
                    (default: \$TIN_CAN_DIR or ~/.claude/resume-prompts)
   --latest         auto-select the newest handoff in the search dir
+  --list           show the handoffs --latest would consider
   --dry-run        show what would run (paths escaped); launch nothing
   --version        print version
   -h, --help       print this help
@@ -205,11 +207,11 @@ name_has_repo() {
   return 1
 }
 
-# find_handoff DIR REPO -> sets FOUND, or FIND_ERR and returns 1.
-find_handoff() {
-  local dir="$1" repo="$2" cdir wr f name
-  local best="" pref="" skipped=0
-  FOUND=""
+# check_search_dir DIR -> sets CDIR (canonical search dir), or FIND_ERR and
+# returns 1 when the directory may not be searched.
+check_search_dir() {
+  local dir="$1" wr
+  CDIR=""
   FIND_ERR=""
   if [ ! -d "$dir" ]; then
     FIND_ERR="handoff search dir not found: $(shown "$dir") (pass HANDOFF_FILE or use --dir)"
@@ -219,48 +221,72 @@ find_handoff() {
     FIND_ERR="cannot enter handoff search dir: $(shown "$dir")"
     return 1
   fi
-  cdir="$CANON"
-  if has_ctrl "$cdir"; then
-    FIND_ERR="handoff search dir contains a control character: $(shown "$cdir")"
+  if has_ctrl "$CANON"; then
+    FIND_ERR="handoff search dir contains a control character: $(shown "$CANON")"
     return 1
   fi
-  if [ ! -O "$cdir" ]; then
-    FIND_ERR="refusing to auto-select from $(shown "$cdir"): not owned by you (an explicit HANDOFF_FILE is still allowed)"
+  if [ ! -O "$CANON" ]; then
+    FIND_ERR="refusing to auto-select from $(shown "$CANON"): not owned by you (an explicit HANDOFF_FILE is still allowed)"
     return 1
   fi
-  wr="$(find "$cdir" -maxdepth 0 \( -perm -0020 -o -perm -0002 \) -print 2>/dev/null || true)"
+  wr="$(find "$CANON" -maxdepth 0 \( -perm -0020 -o -perm -0002 \) -print 2>/dev/null || true)"
   if [ -n "$wr" ]; then
-    FIND_ERR="refusing to auto-select from $(shown "$cdir"): it is group- or world-writable (an explicit HANDOFF_FILE is still allowed)"
+    FIND_ERR="refusing to auto-select from $(shown "$CANON"): it is group- or world-writable (an explicit HANDOFF_FILE is still allowed)"
     return 1
   fi
+  CDIR="$CANON"
+}
+
+# classify_candidate PATH -> sets KIND: ok (eligible), name (skipped by name),
+# unsafe (symlink, unsafe name or not owned by you) or ignore (unmatched glob,
+# directory, device, unreadable). A global, not a return code, because of set -e.
+classify_candidate() {
+  local f="$1" name="${1##*/}"
+  KIND="ok"
+  if [ ! -e "$f" ] && [ ! -L "$f" ]; then
+    KIND="ignore" # unmatched glob
+    return 0
+  fi
+  case "$name" in
+    superseded-* | _* | *-auto.md)
+      KIND="name"
+      return 0
+      ;;
+  esac
+  if has_ctrl "$name" || [ -L "$f" ]; then
+    KIND="unsafe"
+  elif [ ! -f "$f" ] || [ ! -r "$f" ]; then
+    KIND="ignore"
+  elif [ ! -O "$f" ]; then
+    KIND="unsafe"
+  fi
+  return 0
+}
+
+# find_handoff DIR REPO -> sets FOUND, or FIND_ERR and returns 1.
+find_handoff() {
+  local repo="$2" cdir f name
+  local best="" pref="" skipped=0
+  FOUND=""
+  check_search_dir "$1" || return 1
+  cdir="$CDIR"
 
   for f in "$cdir"/*.md; do
-    if [ ! -e "$f" ] && [ ! -L "$f" ]; then
-      continue # unmatched glob
-    fi
     name="${f##*/}"
-    case "$name" in
-      superseded-* | _* | *-auto.md) continue ;;
+    classify_candidate "$f"
+    case "$KIND" in
+      unsafe) skipped=$((skipped + 1)) ;;
+      ok)
+        if [ -z "$best" ] || [ "$f" -nt "$best" ]; then
+          best="$f"
+        fi
+        if name_has_repo "$name" "$repo"; then
+          if [ -z "$pref" ] || [ "$f" -nt "$pref" ]; then
+            pref="$f"
+          fi
+        fi
+        ;;
     esac
-    if has_ctrl "$name" || [ -L "$f" ]; then
-      skipped=$((skipped + 1))
-      continue
-    fi
-    if [ ! -f "$f" ] || [ ! -r "$f" ]; then
-      continue # directory, device, unreadable
-    fi
-    if [ ! -O "$f" ]; then
-      skipped=$((skipped + 1))
-      continue
-    fi
-    if [ -z "$best" ] || [ "$f" -nt "$best" ]; then
-      best="$f"
-    fi
-    if name_has_repo "$name" "$repo"; then
-      if [ -z "$pref" ] || [ "$f" -nt "$pref" ]; then
-        pref="$f"
-      fi
-    fi
   done
   if [ -n "$pref" ]; then
     FOUND="$pref"
@@ -272,6 +298,98 @@ find_handoff() {
       FIND_ERR="$FIND_ERR; $skipped candidate(s) skipped: symlink, not owned by you, or unsafe name"
     fi
     return 1
+  fi
+}
+
+LIST_LIMIT=10
+
+# list_handoffs DIR REPO -> prints the handoffs find_handoff would consider,
+# newest first (equal mtimes in file-name order, like find_handoff's strict
+# -nt), marking the one it would pick. Sets FIND_ERR and returns 1 on a
+# search-dir error.
+list_handoffs() {
+  local repo="$2" cdir f name i j n shown_n=0 mark1 mark2 line
+  local by_name=0 unsafe=0 pick="" skip="" pick_shown=0
+  local sorted=()
+  check_search_dir "$1" || return 1
+  cdir="$CDIR"
+  if find_handoff "$cdir" "$repo"; then
+    pick="$FOUND"
+  fi
+
+  for f in "$cdir"/*.md; do
+    classify_candidate "$f"
+    case "$KIND" in
+      name) by_name=$((by_name + 1)) ;;
+      unsafe) unsafe=$((unsafe + 1)) ;;
+      ok)
+        # Insert before the first strictly older entry: equal mtimes keep the
+        # name order of the glob.
+        n=${#sorted[@]}
+        i=0
+        while [ "$i" -lt "$n" ] && ! [ "$f" -nt "${sorted[$i]}" ]; do
+          i=$((i + 1))
+        done
+        j=$n
+        while [ "$j" -gt "$i" ]; do
+          sorted[j]="${sorted[$((j - 1))]}"
+          j=$((j - 1))
+        done
+        sorted[i]="$f"
+        ;;
+    esac
+  done
+
+  line="$PROG: handoffs in $(shown "$cdir"), newest first (* = --latest would pick it"
+  if [ -n "$repo" ]; then
+    line="$line, + = named for $(shown "$repo")"
+  fi
+  printf '%s)\n' "$line"
+  n=${#sorted[@]}
+  if [ "$n" -eq 0 ]; then
+    printf '(no candidates)\n'
+  fi
+  for ((i = 0; i < n && i < LIST_LIMIT; i++)); do
+    f="${sorted[$i]}"
+    name="${f##*/}"
+    mark1=" "
+    mark2=" "
+    if [ "$f" = "$pick" ]; then
+      mark1="*"
+    fi
+    if name_has_repo "$name" "$repo"; then
+      mark2="+"
+    fi
+    printf '%s %s %s\n' "$mark1" "$mark2" "$(shown "$name")"
+    shown_n=$((shown_n + 1))
+    if [ "$f" = "$pick" ]; then
+      pick_shown=1
+    fi
+  done
+  # The --latest pick must always be visible, even when older than the newest 10.
+  if [ -n "$pick" ] && [ "$pick_shown" -eq 0 ]; then
+    name="${pick##*/}"
+    mark2=" "
+    if name_has_repo "$name" "$repo"; then
+      mark2="+"
+    fi
+    printf '* %s %s\n' "$mark2" "$(shown "$name")"
+    shown_n=$((shown_n + 1))
+  fi
+  if [ "$n" -gt "$shown_n" ]; then
+    printf '  ... and %d more\n' "$((n - shown_n))"
+  fi
+  if [ "$by_name" -gt 0 ]; then
+    skip="$by_name by name (superseded-*, _*, *-auto.md)"
+  fi
+  if [ "$unsafe" -gt 0 ]; then
+    if [ -n "$skip" ]; then
+      skip="$skip; "
+    fi
+    skip="$skip$unsafe unsafe (symlink, not owned by you, or unsafe name)"
+  fi
+  if [ -n "$skip" ]; then
+    printf 'skipped: %s\n' "$skip"
   fi
 }
 
@@ -305,7 +423,7 @@ print_fallback() { # print_fallback CMD
 main() {
   local agent="${TIN_CAN_AGENT:-claude}"
   local term="${TIN_CAN_TERM:-auto}"
-  local where="tab" where_given=0 cwd="" dry_run=0 latest=0
+  local where="tab" where_given=0 cwd="" dry_run=0 latest=0 list=0
   local search_dir="${TIN_CAN_DIR:-${HOME:-}/.claude/resume-prompts}"
   local handoff_arg="" have_handoff=0
   local agent_bin repo handoff hd hbase prompt cmd session="" rc err a opt
@@ -345,6 +463,10 @@ main() {
         ;;
       --latest)
         latest=1
+        shift
+        ;;
+      --list)
+        list=1
         shift
         ;;
       --)
@@ -401,6 +523,14 @@ main() {
 
   if has_ctrl "$search_dir"; then
     die 2 "handoff search dir contains a control character; refusing: $(shown "$search_dir")"
+  fi
+
+  if [ "$list" -eq 1 ]; then
+    if [ "$have_handoff" -eq 1 ] || [ "$latest" -eq 1 ]; then
+      die 2 "--list cannot be combined with HANDOFF_FILE or --latest"
+    fi
+    list_handoffs "$search_dir" "$repo" || die 2 "$FIND_ERR"
+    exit 0
   fi
 
   if [ "$latest" -eq 1 ] && [ "$have_handoff" -eq 1 ]; then

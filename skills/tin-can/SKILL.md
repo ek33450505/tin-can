@@ -55,6 +55,7 @@ Mention the options that may matter:
 
 - `--agent codex` to start a different agent (default `claude`).
 - `--where window` to open a new window/workspace instead of a tab.
+- `--list` to see which handoffs `--latest` would consider.
 - `--dry-run` to preview the command without launching anything.
 
 If tin-can is not installed, say so and point to `install.sh` in the tin-can repository rather than working around it.

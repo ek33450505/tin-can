@@ -29,6 +29,7 @@ Because these are symlinks, the live `tin-can` binary and the auto-loaded `SKILL
 ```bash
 tin-can path/to/handoff.md                # a specific file
 tin-can --latest                          # newest handoff in ~/.claude/resume-prompts, preferring this repo's
+tin-can --list                            # see which handoffs `--latest` would consider
 tin-can --agent codex handoff.md          # start Codex instead of Claude Code
 tin-can --where window handoff.md         # new window/workspace (cmux) or detached session (tmux) instead of a tab
 tin-can --term print handoff.md           # just print the command to paste into a tab yourself
@@ -39,7 +40,7 @@ Inside Claude Code, run it with the `!` prefix so it runs in your shell: `! tin-
 
 The new session starts in the current directory (`--cwd` sets another). `tin-can` warns on stderr, and still launches, when the handoff is neither inside that directory nor named for it. This catches mistakes; it is not a security check, since a file can simply be named after the repository.
 
-Options: `--agent`, `--term`, `--where`, `--cwd`, `--dir`, `--latest`, `--dry-run`, `--version`, `--help`. Option values must be non-empty and not start with `-`. Use `--` before a file name that starts with `-`. Environment defaults: `TIN_CAN_AGENT`, `TIN_CAN_TERM`, `TIN_CAN_DIR`.
+Options: `--agent`, `--term`, `--where`, `--cwd`, `--dir`, `--latest`, `--list`, `--dry-run`, `--version`, `--help`. Option values must be non-empty and not start with `-`. Use `--` before a file name that starts with `-`. Environment defaults: `TIN_CAN_AGENT`, `TIN_CAN_TERM`, `TIN_CAN_DIR`.
 
 With `--latest` instead of a file, `tin-can` takes the newest `*.md` in the search directory, skips names starting with `superseded-` or `_` and names ending in `-auto.md` (auto-generated resume scaffolds), and prefers files whose name contains the working directory's name as a whole word (`-`, `_` and `.` count as separators, so `cast` matches `2026-10-12-cast-next.md` but not `broadcast-plan.md`). It reports the choice on stderr. With neither a file nor `--latest` it exits 2 rather than guess; giving both is also an error. Exit codes: `0` ok, `1` launch failure (the paste-able command is printed as a fallback), `2` usage or handoff error. A path containing any of the following is refused with exit 2 when it is given explicitly (`--cwd`, `--dir`, an explicit `HANDOFF_FILE`), and the file is silently skipped when it is only an auto-selection candidate (the error says how many were skipped if nothing else qualifies): ASCII control characters (0x01-0x1F, including tab, newline, CR and ESC, and DEL 0x7F); C1 controls (U+0080-U+009F); Unicode line and paragraph separators (U+2028, U+2029); bidirectional embeddings and overrides (U+202A-U+202E); bidirectional isolates (U+2066-U+2069); the left-to-right, right-to-left and Arabic letter marks (U+200E, U+200F, U+061C); Unicode tag characters (U+E0000-U+E007F); or lookalike spaces (U+00A0, U+2000-U+200A, U+202F, U+205F, U+3000). Other non-ASCII text (letters with accents, CJK ideographs, emoji) is accepted. Files with equal modification times are taken in file-name order.
 
