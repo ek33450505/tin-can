@@ -4,12 +4,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-10-20
+
+### Changed
+- **Behavior change:** paths containing the soft hyphen (U+00AD), zero-width space (U+200B), word joiner (U+2060) or zero-width no-break space (U+FEFF), which were accepted before, are now refused like the other disguising characters: exit 2 when given explicitly, skipped when they are only an auto-selection candidate. The zero-width joiner and non-joiner (U+200D, U+200C) are still accepted, because emoji sequences and some scripts need them.
+- README reorganised: quick start, example output, how it works, FAQ. The release history moved here from the README.
+- `AGENTS.md` at the repository root now holds instructions for contributors. If you copied or linked the snippet for your own `AGENTS.md`, it is now `docs/agents-snippet.md`.
+
 ### Added
 - CHANGELOG.md, CONTRIBUTING.md, SECURITY.md, CODE_OF_CONDUCT.md, issue and pull request templates, and contributor instructions in AGENTS.md, imported by `.claude/CLAUDE.md` (the snippet for your own AGENTS.md moved to docs/agents-snippet.md).
 
-### Changed
-- README reorganised: quick start, example output, how it works, FAQ. The release history moved here from the README.
-- `AGENTS.md` at the repository root now holds instructions for contributors. If you copied or linked the snippet for your own `AGENTS.md`, it is now `docs/agents-snippet.md`.
+### Fixed
+- The plugin hook checks session ids byte by byte. Under macOS's bash 3.2 in a UTF-8 locale it accepted ids containing non-ASCII letters such as `é` and created state directories with those names.
 
 ## [0.2.0] — 2026-10-20
 
@@ -49,7 +55,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 ### Added
 - Launch a fresh agent session (Claude Code or Codex) in a new cmux or tmux tab, or print the command, pointed at a handoff file.
 
-[Unreleased]: https://github.com/ek33450505/tin-can/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ek33450505/tin-can/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/ek33450505/tin-can/releases/tag/v0.2.1
 [0.2.0]: https://github.com/ek33450505/tin-can/releases/tag/v0.2.0
 [0.1.2]: https://github.com/ek33450505/tin-can/releases/tag/v0.1.2
 [0.1.1]: https://github.com/ek33450505/tin-can/releases/tag/v0.1.1

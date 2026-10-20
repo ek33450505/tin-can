@@ -60,7 +60,7 @@ CI runs shellcheck and the bats suite on Ubuntu. A macOS job runs the suite unde
 - Bash 3.2 compatible. No `mapfile`, `readarray`, `${x,,}`, `${x^^}`, `declare -A`, `;&`, `;;&` or any other bash 4+ feature. `/bin/bash -n` checks syntax only; the `TIN_CAN_TEST_BASH=/bin/bash` bats run is the real check.
 - In `bin/tin-can`, `hooks/tin-can-hook` and `install.sh`: POSIX `[ ]` tests, not `[[ ]]`. In bats tests, assert with `[[ ... ]] || return 1`. 2-space indent. Quote every expansion.
 - Never interpolate handoff contents into a shell command. Build commands with the existing single-quoting helper.
-- Paths with control, bidi or invisible characters are refused. Keep that behavior when you touch path handling.
+- Paths with the characters listed under "Refused paths" in README.md are refused (controls, bidi, some invisible characters, lookalike spaces). Keep that behavior when you touch path handling.
 - Keep the change small. Do not add dependencies to `bin/tin-can`. `jq` is needed only for the optional hooks.
 
 ## Reporting issues
