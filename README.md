@@ -2,13 +2,62 @@
 
 Hand an AI coding session off to a fresh session in a new terminal tab, without copy-paste.
 
+[![CI](https://github.com/ek33450505/tin-can/actions/workflows/ci.yml/badge.svg)](https://github.com/ek33450505/tin-can/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/ek33450505/tin-can)](https://github.com/ek33450505/tin-can/releases) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 `tin-can` opens a new terminal tab (in cmux, tmux, Zellij, WezTerm or kitty; or prints the command for any other terminal), starts your agent CLI there, and gives it a single prompt: read this handoff file and follow its KICKOFF section. The name is the tin-can telephone: a message passed down a string.
 
 It is a small bash script. It works with more than one agent and more than one terminal, and you trigger it yourself.
 
+## Quick start
+
+1. Clone the repository and run the installer:
+
+   ```bash
+   git clone https://github.com/ek33450505/tin-can
+   cd tin-can
+   ./install.sh
+   ```
+
+   If you will install the Claude Code plugin, use `./install.sh --no-skill` (see [Claude Code plugin](#claude-code-plugin-optional)).
+2. In your agent session, ask it to write a handoff. In Claude Code, the bundled `tin-can` skill does this. For other agents, add [docs/agents-snippet.md](docs/agents-snippet.md) to your AGENTS.md. tin-can does not write the handoff; the agent does.
+3. The agent gives you the command to run: `! tin-can '<path>'` in Claude Code, `tin-can '<path>'` in your shell elsewhere. Run it, or run `tin-can --latest` from the repository.
+4. A new tab opens. The agent in it reads the handoff and follows its KICKOFF section.
+
+## Example
+
+This example runs `tin-can` inside `~/src/widget-service`. `~/.claude/resume-prompts` holds three handoffs, one auto-generated `-auto.md` scaffold and one `superseded-` file. The output below comes from tin-can 0.2.0, run in a temporary HOME; only the home prefix was replaced with `/Users/you`. The terminal shows as `print` because the demo ran outside any supported terminal, so `--term auto` fell back to printing the command.
+
+```text
+$ tin-can --list
+tin-can: handoffs in /Users/you/.claude/resume-prompts, newest first (* = --latest would pick it, + = named for widget-service)
+    2026-10-20-docs-site-nav.md
+* + 2026-10-19-widget-service-retry.md
+    2026-10-18-billing-api-invoices.md
+skipped: 2 by name (superseded-*, _*, *-auto.md)
+
+$ tin-can --latest --dry-run
+tin-can: using /Users/you/.claude/resume-prompts/2026-10-19-widget-service-retry.md
+tin-can dry-run (nothing launched)
+  agent:   claude
+  term:    print (tab)
+  cwd:     /Users/you/src/widget-service
+  handoff: /Users/you/.claude/resume-prompts/2026-10-19-widget-service-retry.md
+  launch:  (print only)
+  command: cd '/Users/you/src/widget-service' && exec 'claude' 'Read the handoff file at /Users/you/.claude/resume-prompts/2026-10-19-widget-service-retry.md and follow its KICKOFF section.'
+```
+
+`--latest` picks `2026-10-19-widget-service-retry.md` even though `2026-10-20-docs-site-nav.md` is newer, because the file is named for the repository. The `-auto.md` scaffold and the `superseded-` file are skipped by name, which is why the listing reports two skipped files.
+
 ## Why
 
 Long sessions fill their context. The usual fix is to summarise the work, open a new tab, start the agent, and paste the summary in. `tin-can` makes that one command: the old session writes a handoff file, you run `tin-can`, and the fresh session starts already pointed at it.
+
+## How it works
+
+1. The old session's agent writes a markdown handoff with a `## KICKOFF` section. The format is in [docs/handoff-format.md](docs/handoff-format.md).
+2. You run `tin-can <file>` or `tin-can --latest`. Inside Claude Code, run it as `! tin-can <file>` so it runs in your shell.
+3. tin-can resolves and checks the path, picks the terminal (the `--term auto` order is in [Supported terminals and agents](#supported-terminals-and-agents)), and runs `cd 'DIR' && exec 'AGENT' 'PROMPT'` in a new tab (or a new window with `--where window`). With `--term print` it prints that command instead.
+4. The new agent's only prompt is `Read the handoff file at <absolute path> and follow its KICKOFF section.` The agent reads the file itself. tin-can never parses the handoff.
 
 ## Install
 
@@ -74,9 +123,32 @@ The new session starts in the current directory (`--cwd` sets another). `tin-can
 
 Options: `--agent`, `--term`, `--where`, `--cwd`, `--dir`, `--latest`, `--list`, `--dry-run`, `--version`, `--help`. Option values must be non-empty and not start with `-`. Use `--` before a file name that starts with `-`. Environment defaults: `TIN_CAN_AGENT`, `TIN_CAN_TERM`, `TIN_CAN_DIR`.
 
-With `--latest` instead of a file, `tin-can` takes the newest `*.md` in the search directory, skips names starting with `superseded-` or `_` and names ending in `-auto.md` (auto-generated resume scaffolds), and prefers files whose name contains the working directory's name as a whole word (`-`, `_` and `.` count as separators, so `cast` matches `2026-10-12-cast-next.md` but not `broadcast-plan.md`). It reports the choice on stderr. With neither a file nor `--latest` it exits 2 rather than guess; giving both is also an error. Exit codes: `0` ok, `1` launch failure (the paste-able command is printed as a fallback), `2` usage or handoff error. A path containing any of the following is refused with exit 2 when it is given explicitly (`--cwd`, `--dir`, an explicit `HANDOFF_FILE`), and the file is silently skipped when it is only an auto-selection candidate (the error says how many were skipped if nothing else qualifies): ASCII control characters (0x01-0x1F, including tab, newline, CR and ESC, and DEL 0x7F); C1 controls (U+0080-U+009F); Unicode line and paragraph separators (U+2028, U+2029); bidirectional embeddings and overrides (U+202A-U+202E); bidirectional isolates (U+2066-U+2069); the left-to-right, right-to-left and Arabic letter marks (U+200E, U+200F, U+061C); Unicode tag characters (U+E0000-U+E007F); or lookalike spaces (U+00A0, U+2000-U+200A, U+202F, U+205F, U+3000). Other non-ASCII text (letters with accents, CJK ideographs, emoji) is accepted. Files with equal modification times are taken in file-name order.
+The handoff file is an ordinary markdown file with a `## KICKOFF` section; see [docs/handoff-format.md](docs/handoff-format.md). The bundled Claude Code skill (`skills/tin-can`) and the [agents snippet](docs/agents-snippet.md) teach an agent to write one and tell you the command to run.
 
-The handoff file is an ordinary markdown file with a `## KICKOFF` section; see [docs/handoff-format.md](docs/handoff-format.md). The bundled Claude Code skill (`skills/tin-can`) and the [AGENTS.md](AGENTS.md) snippet teach an agent to write one and tell you the command to run.
+### Choosing a handoff with --latest
+
+With `--latest` instead of a file, `tin-can` takes the newest `*.md` in the search directory, skips names starting with `superseded-` or `_` and names ending in `-auto.md` (auto-generated resume scaffolds), and prefers files whose name contains the working directory's name as a whole word (`-`, `_` and `.` count as separators, so `cast` matches `2026-10-12-cast-next.md` but not `broadcast-plan.md`). Files with equal modification times are taken in file-name order. It reports the choice on stderr. With neither a file nor `--latest` it exits 2 rather than guess; giving both is also an error.
+
+### Exit codes
+
+- `0`: ok.
+- `1`: launch failure. The paste-able command is printed as a fallback.
+- `2`: usage or handoff error.
+
+### Refused paths
+
+A path containing any of the following is refused with exit 2 when it is given explicitly (`--cwd`, `--dir`, an explicit `HANDOFF_FILE`). When it is only an auto-selection candidate, the file is silently skipped; the error says how many were skipped if nothing else qualifies.
+
+- ASCII control characters (0x01-0x1F, including tab, newline, CR and ESC, and DEL 0x7F)
+- C1 controls (U+0080-U+009F)
+- Unicode line and paragraph separators (U+2028, U+2029)
+- bidirectional embeddings and overrides (U+202A-U+202E)
+- bidirectional isolates (U+2066-U+2069)
+- the left-to-right, right-to-left and Arabic letter marks (U+200E, U+200F, U+061C)
+- Unicode tag characters (U+E0000-U+E007F)
+- lookalike spaces (U+00A0, U+2000-U+200A, U+202F, U+205F, U+3000)
+
+Other non-ASCII text (letters with accents, CJK ideographs, emoji) is accepted.
 
 ## Supported terminals and agents
 
@@ -97,13 +169,15 @@ The command run in the new terminal is `cd 'DIR' && exec 'AGENT' 'PROMPT'`, buil
 
 ## Trust model
 
-- You run it. An agent never needs access to a terminal's control socket. The bundled skill and `AGENTS.md` tell an agent to ask you to run the command; that is an instruction, not a technical control. An agent's shell inherits `CMUX_WORKSPACE_ID`, `TMUX`, `ZELLIJ`, `WEZTERM_PANE`, `KITTY_WINDOW_ID`, `WEZTERM_UNIX_SOCKET` or `KITTY_LISTEN_ON`, so sandboxing and permission settings are the real barrier against an agent launching sessions itself.
+- You run it. An agent never needs access to a terminal's control socket. The bundled skill and the agents snippet (`docs/agents-snippet.md`) tell an agent to ask you to run the command; that is an instruction, not a technical control. An agent's shell inherits `CMUX_WORKSPACE_ID`, `TMUX`, `ZELLIJ`, `WEZTERM_PANE`, `KITTY_WINDOW_ID`, `WEZTERM_UNIX_SOCKET` or `KITTY_LISTEN_ON`, so sandboxing and permission settings are the real barrier against an agent launching sessions itself.
 - The only text given to the new agent is `Read the handoff file at <absolute path> and follow its KICKOFF section.` as a single argument.
 - File contents are never interpolated into a shell command. The directory, agent name and prompt are each single-quoted, and paths with control characters are refused outright. The test suite round-trips paths containing spaces, quotes, `$`, backticks, glob and shell metacharacters, a leading `-`, and non-ASCII text (including under `LC_ALL=C`) through bash, zsh and dash.
 - **Whoever can write into the handoff directory steers the next session.** The new agent will read the chosen file and may act on it. `--latest` picks the newest file, or the newest whose name contains the repository name, so a file dropped into that directory can win. Mitigations in the tool: auto-selection refuses a directory that is group- or world-writable or not owned by you, and skips symlinks and files not owned by you; an explicit file that is a symlink, not yours, or inside a group- or world-writable directory prints a warning. There is no interactive confirmation, because `! tin-can` has no terminal to ask on.
 - `--dry-run` shows the directory, handoff and launch arguments escaped, and the `command:` line raw so it can be pasted. When that command, or the one printed by `--term print` or after a failed launch, contains non-ASCII characters, a note on stderr says so. A failed launch's error output is indented and shown with every byte other than printable ASCII, newline and tab replaced by `?`.
 - The optional plugin hooks run automatically, but they only print a command or ask the model to write a handoff. They never launch a session, and `TIN_CAN_HOOKS=0` turns them off.
 - Read the handoff before launching it, especially one written by an agent: with `--latest`, run `tin-can --latest --dry-run` first to see which file would be used, then open it.
+
+To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## Known limitations
 
@@ -112,18 +186,44 @@ The command run in the new terminal is `cd 'DIR' && exec 'AGENT' 'PROMPT'`, buil
 - Processes running as your own user, including a compromised agent, can still plant a file you own in the handoff directory. Ownership checks do not help there: review the file with `--latest --dry-run` before launching.
 - The "not owned by you" paths are not covered by tests (see Development).
 
+## FAQ
+
+**Does tin-can write the handoff?**
+No. Your agent writes it, guided by the bundled skill or the [agents snippet](docs/agents-snippet.md). tin-can only launches the new session.
+
+**Why doesn't the agent launch the new session itself?**
+That is a trust decision: you trigger the launch. An agent's sandbox and permission settings are the real barrier, and `! tin-can` runs in your shell. See [Trust model](#trust-model).
+
+**My terminal isn't supported. What now?**
+Use `--term print`. It prints a command you can paste into a tab yourself. tin-can also prints that command after a failed launch.
+
+**Does it work with Codex?**
+Codex can be started with `--agent codex` or `TIN_CAN_AGENT=codex`. Codex support is tested with stubs only.
+
+**Why did `--latest` pick an older file?**
+`--latest` prefers names that contain the working directory's name as a whole word, so an older file named for this repository can win over a newer one. Run `tin-can --list` to see what it would consider and which file it would pick.
+
+**Do I need the Claude Code plugin?**
+No. The plugin adds the skill and three hooks that make handoffs harder to forget. `install.sh` links the `tin-can` binary either way.
+
+**What if I just `/exit`?**
+No hook can force a handoff then, because the model gets no turn. Ask for the handoff before you exit.
+
+**Which shells can receive the command?**
+sh, dash, bash and zsh. fish and csh/tcsh are not supported.
+
 ## Development
 
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ```bash
-bats tests/              # needs bats-core; uses stub cmux/tmux/claude/codex and a temp HOME
-shellcheck bin/tin-can install.sh tests/helpers.bash tests/require_bash4.bash
+bats tests/              # needs bats-core; uses stub cmux/tmux/zellij/wezterm/kitten/claude/codex and a temp HOME
+shellcheck --shell=bash bin/tin-can install.sh hooks/tin-can-hook tests/helpers.bash tests/require_bash4.bash
 TIN_CAN_TEST_BASH=/bin/bash bats tests/   # run the script under test on macOS bash 3.2 (bats itself stays on bash >= 4)
-shfmt -d -i 2 -ci bin/tin-can install.sh tests/helpers.bash tests/require_bash4.bash   # style: 2-space indent, indented case
+shfmt -d -i 2 -ci bin/tin-can install.sh hooks/tin-can-hook tests/helpers.bash tests/require_bash4.bash   # style: 2-space indent, indented case
 ```
 
-bats itself must run on bash >= 4: under bash 3.2 every test fails in setup with an explanation, because bash 3.2 would make assertions vacuous. `TIN_CAN_TEST_BASH=/bin/bash` still covers the script under 3.2.
-
-The "not owned by you" checks need a file owned by another user, which needs root to create, so those paths are not covered by tests.
+bats itself must run on bash >= 4: under bash 3.2 every test fails in setup with an explanation, because bash 3.2 would make assertions vacuous. `TIN_CAN_TEST_BASH=/bin/bash` still covers the script under 3.2. The "not owned by you" checks need a file owned by another user, which needs root to create, so those paths are not covered by tests.
 
 ## Related projects
 
@@ -135,12 +235,9 @@ Other tools approach the same problem, mostly aimed at Claude Code and tmux:
 
 `tin-can` aims to be agent- and terminal-agnostic, at the cost of doing less: it does not write the handoff for you and it does not parse it.
 
-## Changes
+## Changelog
 
-- **0.2.0**: **behavior change:** tin-can now warns on stderr, and still launches, when the handoff is neither inside the directory the session will start in nor named for the repository (for example a `--latest` pick from `~/.claude/resume-prompts` that is named for another repo). `--list` shows the newest 10 handoffs that `--latest` would consider, marks the one it would pick (`*`, shown even when older) and those named for the repository (`+`), and counts files skipped by name or as unsafe; it exits 0 for a listing, including an empty one, and 2 when the search directory is missing or unsafe. New terminal backends, tested with stubs only: Zellij (a tab, or a detached session for `--where window`), WezTerm, and kitty (which needs remote control enabled). `--term auto` checks cmux, tmux, Zellij, WezTerm, kitty, then print, each by its environment variable and a binary on `PATH`, so inside Zellij, WezTerm or kitty it now opens a tab where it used to print the command. An optional Claude Code plugin bundles the skill with three hooks that run in every session, on every prompt, Write/Edit/MultiEdit and turn end (they need `jq`; `TIN_CAN_HOOKS=0` turns them off; the `tin-can` binary still comes from `install.sh`): when a handoff is written directly into the handoff directory they surface `! tin-can '<path>'` to you and to the model; on a wrap-up phrase they ask for a handoff if work is unfinished; and at the end of that turn, if git shows uncommitted or unpushed work, the reply has no `! tin-can` line and no handoff was written, they ask once more, at most once per session. `install.sh --no-skill` links only the binary, and `install.sh` is now executable. `--help` lists the new terminals and `--list`, and says that `--dry-run` shows paths escaped.
-- **0.1.2**: **behavior changes:** some paths that used to work are now refused, and `--dry-run` prints paths in a different form (details below). `--latest` skips names ending in `-auto.md` (auto-generated resume scaffolds); an explicit `HANDOFF_FILE` with that ending is still accepted. Paths containing Unicode tag characters (U+E0000-U+E007F) or lookalike spaces (U+00A0, U+2000-U+200A, U+202F, U+205F, U+3000), which were accepted before, are now refused like the other disguising characters. A failed launch's error output is indented and shown with every byte other than printable ASCII, newline and tab replaced by `?`. `--dry-run` shows the directory, handoff and launch arguments escaped, so an ordinary path with a space now appears as `my\ project`; the `command:` line stays raw so it can be pasted, and a stderr note flags a command containing non-ASCII characters (also with `--term print` and after a failed launch). If bats itself runs on bash 3.2, every test now fails in setup with an explanation.
-- **0.1.1**: **breaking:** auto-selecting the newest handoff now needs `--latest`. A bare `tin-can`, or `tin-can --dry-run` without a file, exits 2 instead of guessing, and giving both a file and `--latest` also exits 2. The left-to-right, right-to-left and Arabic letter marks (U+200E, U+200F, U+061C) are refused in paths like the other bidi controls. Paths in tin-can's own error and warning messages, and in the `using` line, are shown shell-escaped (`printf %q`).
-- **0.1.0**: first version.
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
