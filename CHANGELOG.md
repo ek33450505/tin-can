@@ -9,6 +9,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 ### Changed
 - README reorganised: quick start, example output, how it works, FAQ. The release history moved here from the README.
+- `AGENTS.md` at the repository root now holds instructions for contributors. If you copied or linked the snippet for your own `AGENTS.md`, it is now `docs/agents-snippet.md`.
 
 ## [0.2.0] — 2026-10-20
 

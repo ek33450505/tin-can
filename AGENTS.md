@@ -8,7 +8,7 @@ tin-can hands a coding session to a fresh terminal tab. The old session's agent 
 - Keep bash 3.2 compatibility. `TIN_CAN_TEST_BASH=/bin/bash bats tests/` is the real check: `/bin/bash -n` checks syntax only and does not catch bash 4+ features such as `declare -A`, `${x,,}` or `mapfile`.
 - Run both bats modes before saying tests pass. Read the TAP counts (`1..N`, any `not ok`), not the exit status alone.
 - Mutation-check every new test: break the code, confirm the test fails, restore.
-- Bump `VERSION` and `.claude-plugin/plugin.json` together.
+- Bump `VERSION` and `.claude-plugin/plugin.json` together, and update the README's pinned `#vX.Y.Z` plugin tag on release.
 - Do not put instructions for your own project's AGENTS.md here. That snippet is `docs/agents-snippet.md`.
 
 ## Layout

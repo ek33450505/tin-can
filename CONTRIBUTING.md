@@ -52,7 +52,7 @@ CI runs shellcheck and the bats suite on Ubuntu. A macOS job runs the suite unde
 - [ ] `claude plugin validate .` passes.
 - [ ] `bin/tin-can --help | awk 'length > 80'` prints nothing.
 - [ ] Each new test fails when the code it covers is broken (mutation check).
-- [ ] `VERSION` and `.claude-plugin/plugin.json` are bumped together, if this is a release.
+- [ ] `VERSION` and `.claude-plugin/plugin.json` are bumped together, and the README's pinned tag (`/plugin marketplace add ek33450505/tin-can#vX.Y.Z`) is updated, if this is a release.
 - [ ] `CHANGELOG.md` has an entry under `## [Unreleased]`, if the change is user-visible.
 
 ## Code Style
