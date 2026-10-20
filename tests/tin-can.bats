@@ -232,7 +232,7 @@ load helpers
   [[ "$output" == *"Usage: tin-can"* ]]
   [[ "$output" == *"claude | codex"* ]]
   [[ "$output" == *"--latest"* ]]
-  [[ "$output" == *"cmux | tmux | print | auto"* ]]
+  [[ "$output" == *"cmux | tmux | wezterm | kitty | print | auto"* ]]
 }
 
 @test "latest: no file and no --latest exits 2, names --latest, launches nothing" {
@@ -1458,4 +1458,148 @@ raw_path_sites() {
   [ "${lines[11]}" = "* + oldest-myrepo.md" ]
   [ "${lines[12]}" = "  ... and 1 more" ]
   [ "${#lines[@]}" -eq 13 ]
+}
+
+# --- wezterm and kitty ---------------------------------------------------------
+
+@test "auto: WEZTERM_PANE + wezterm on PATH selects wezterm" {
+  export WEZTERM_PANE=3
+  run_tc --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(call_count wezterm)" -eq 1 ]
+  [ "$(total_calls)" -eq 1 ]
+}
+
+@test "auto: KITTY_WINDOW_ID + kitten on PATH selects kitty" {
+  export KITTY_WINDOW_ID=4
+  run_tc --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(call_count kitten)" -eq 1 ]
+  [ "$(total_calls)" -eq 1 ]
+}
+
+@test "auto: tmux wins over WEZTERM_PANE" {
+  export TMUX=/tmp/tmux-1/default,1,0 WEZTERM_PANE=3
+  run_tc --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(call_count tmux)" -eq 1 ]
+  [ "$(call_count wezterm)" -eq 0 ]
+}
+
+@test "auto: wezterm wins over kitty" {
+  export WEZTERM_PANE=3 KITTY_WINDOW_ID=4
+  run_tc --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(call_count wezterm)" -eq 1 ]
+  [ "$(call_count kitten)" -eq 0 ]
+}
+
+@test "auto: WEZTERM_PANE set but wezterm not on PATH prints" {
+  export WEZTERM_PANE=3
+  rm "$STUBS/wezterm"
+  run_tc --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(total_calls)" -eq 0 ]
+  [[ "$output" == *"exec 'claude'"* ]]
+}
+
+@test "auto: KITTY_WINDOW_ID set but kitten not on PATH prints" {
+  export KITTY_WINDOW_ID=4
+  rm "$STUBS/kitten"
+  run_tc --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(total_calls)" -eq 0 ]
+  [[ "$output" == *"exec 'claude'"* ]]
+}
+
+@test "wezterm tab: cli spawn -- sh -c CMD" {
+  run_tc --term wezterm --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  load_call wezterm
+  [ "${#ARGS[@]}" -eq 6 ]
+  [ "${ARGS[0]}" = "cli" ]
+  [ "${ARGS[1]}" = "spawn" ]
+  [ "${ARGS[2]}" = "--" ]
+  [ "${ARGS[3]}" = "sh" ]
+  [ "${ARGS[4]}" = "-c" ]
+  [ "${ARGS[5]}" = "$(tc_cmd --cwd "$WORK" "$HF")" ]
+}
+
+@test "wezterm window: cli spawn --new-window -- sh -c CMD" {
+  run_tc --term wezterm --where window --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  load_call wezterm
+  [ "${#ARGS[@]}" -eq 7 ]
+  [ "${ARGS[0]}" = "cli" ]
+  [ "${ARGS[1]}" = "spawn" ]
+  [ "${ARGS[2]}" = "--new-window" ]
+  [ "${ARGS[3]}" = "--" ]
+  [ "${ARGS[4]}" = "sh" ]
+  [ "${ARGS[5]}" = "-c" ]
+  [ "${ARGS[6]}" = "$(tc_cmd --cwd "$WORK" "$HF")" ]
+}
+
+@test "kitty tab: @ launch --type=tab sh -c CMD" {
+  run_tc --term kitty --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  load_call kitten
+  [ "${#ARGS[@]}" -eq 6 ]
+  [ "${ARGS[0]}" = "@" ]
+  [ "${ARGS[1]}" = "launch" ]
+  [ "${ARGS[2]}" = "--type=tab" ]
+  [ "${ARGS[3]}" = "sh" ]
+  [ "${ARGS[4]}" = "-c" ]
+  [ "${ARGS[5]}" = "$(tc_cmd --cwd "$WORK" "$HF")" ]
+}
+
+@test "kitty window: @ launch --type=os-window sh -c CMD" {
+  run_tc --term kitty --where window --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  load_call kitten
+  [ "${#ARGS[@]}" -eq 6 ]
+  [ "${ARGS[2]}" = "--type=os-window" ]
+  [ "${ARGS[3]}" = "sh" ]
+  [ "${ARGS[4]}" = "-c" ]
+  [ "${ARGS[5]}" = "$(tc_cmd --cwd "$WORK" "$HF")" ]
+}
+
+@test "failure: wezterm non-zero exits 1 with fallback" {
+  export STUB_EXIT_WEZTERM=1
+  run_tc --term wezterm --cwd "$WORK" "$HF"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"wezterm failed (exit 1)"* ]] || return 1
+  [[ "$output" == *"paste this into a new terminal tab"* ]] || return 1
+  [[ "$output" == *"exec 'claude' "* ]]
+}
+
+@test "failure: kitty non-zero exits 1 with fallback" {
+  export STUB_EXIT_KITTEN=1
+  run_tc --term kitty --cwd "$WORK" "$HF"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"kitty failed (exit 1)"* ]] || return 1
+  [[ "$output" == *"paste this into a new terminal tab"* ]] || return 1
+  [[ "$output" == *"exec 'claude' "* ]]
+}
+
+@test "dry-run: kitty launches nothing and shows kitten @ launch" {
+  run_tc --dry-run --term kitty --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(total_calls)" -eq 0 ]
+  [[ "$output" == *"kitten @ launch"* ]]
+}
+
+@test "roundtrip: wezterm and kitty sh -c CMD survives a hostile directory name" {
+  local d="$TEST_ROOT/rt/it's \$(id) dir" cdir t
+  mkdir -p "$d"
+  printf '# h\n\n## KICKOFF\nGo.\n' >"$d/h.md"
+  cdir="$(cd -P "$d" && pwd -P)"
+  for t in wezterm kitten; do
+    run_tc --term "${t/kitten/kitty}" --cwd "$d" "$d/h.md"
+    [ "$status" -eq 0 ]
+    load_call "$t"
+    env "PATH=$TC_PATH" /bin/sh -c "${ARGS[$((${#ARGS[@]} - 1))]}"
+    load_call claude
+    [ "$CALL_PWD" = "$cdir" ]
+    [ "${#ARGS[@]}" -eq 1 ]
+  done
 }

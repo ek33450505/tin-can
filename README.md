@@ -52,17 +52,19 @@ The handoff file is an ordinary markdown file with a `## KICKOFF` section; see [
 |---|---|
 | Terminal: cmux (tab = new surface, window = new workspace) | Tab verified live (cmux 0.65.0, 2026-10-13); window stub-tested |
 | Terminal: tmux (tab = new window; window = a new detached session, `tmux attach -t NAME` printed) | Tested with stubs only |
+| Terminal: WezTerm (tab = `wezterm cli spawn`; window = `--new-window`) | Tested with stubs only |
+| Terminal: kitty (tab = `kitten @ launch --type=tab`; window = `--type=os-window`; needs kitty remote control, see below) | Tested with stubs only |
 | Terminal: print (any terminal; copy the command) | Tested; no terminal involved |
 | Agent: Claude Code (`claude`) | Verified live (Claude Code 2.1.296, 2026-10-13) |
 | Agent: Codex (`codex`) | Tested with stubs only |
 
-Adding an agent is one name in `SUPPORTED_AGENTS` (plus a `case` branch in `agent_binary` if its binary name differs); adding a terminal is one branch where the launch command is built. `--term auto` picks cmux when `$CMUX_WORKSPACE_ID` is set and `cmux` is on `PATH`, then tmux when `$TMUX` is set and `tmux` is on `PATH`, else print.
+Adding an agent is one name in `SUPPORTED_AGENTS` (plus a `case` branch in `agent_binary` if its binary name differs); adding a terminal is one branch where the launch command is built. `--term auto` picks cmux when `$CMUX_WORKSPACE_ID` is set and `cmux` is on `PATH`, then tmux when `$TMUX` is set and `tmux` is on `PATH`, then WezTerm when `$WEZTERM_PANE` is set and `wezterm` is on `PATH`, then kitty when `$KITTY_WINDOW_ID` is set and `kitten` is on `PATH`, else print. kitty needs remote control enabled. Prefer `allow_remote_control socket-only` plus `listen_on unix:/tmp/kitty` in kitty.conf: kitty then sets `KITTY_LISTEN_ON` for its child shells, which `kitten @` uses. `allow_remote_control yes` also works but is broader: any process in any kitty window, including escape sequences printed by `cat`-ing a hostile file, can then drive kitty. Without remote control the launch fails and tin-can prints the paste-able command. See https://sw.kovidgoyal.net/kitty/remote-control/.
 
 The command run in the new terminal is `cd 'DIR' && exec 'AGENT' 'PROMPT'`, built with POSIX single-quoting, so it is valid in the POSIX sh family (sh, dash, bash) and in zsh. fish and csh/tcsh are not supported as the shell that receives the command.
 
 ## Trust model
 
-- You run it. An agent never needs access to a terminal's control socket. The bundled skill and `AGENTS.md` tell an agent to ask you to run the command; that is an instruction, not a technical control. An agent's shell inherits `CMUX_WORKSPACE_ID` or `TMUX`, so sandboxing and permission settings are the real barrier against an agent launching sessions itself.
+- You run it. An agent never needs access to a terminal's control socket. The bundled skill and `AGENTS.md` tell an agent to ask you to run the command; that is an instruction, not a technical control. An agent's shell inherits `CMUX_WORKSPACE_ID`, `TMUX`, `WEZTERM_PANE`, `KITTY_WINDOW_ID`, `WEZTERM_UNIX_SOCKET` or `KITTY_LISTEN_ON`, so sandboxing and permission settings are the real barrier against an agent launching sessions itself.
 - The only text given to the new agent is `Read the handoff file at <absolute path> and follow its KICKOFF section.` as a single argument.
 - File contents are never interpolated into a shell command. The directory, agent name and prompt are each single-quoted, and paths with control characters are refused outright. The test suite round-trips paths containing spaces, quotes, `$`, backticks, glob and shell metacharacters, a leading `-`, and non-ASCII text (including under `LC_ALL=C`) through bash, zsh and dash.
 - **Whoever can write into the handoff directory steers the next session.** The new agent will read the chosen file and may act on it. `--latest` picks the newest file, or the newest whose name contains the repository name, so a file dropped into that directory can win. Mitigations in the tool: auto-selection refuses a directory that is group- or world-writable or not owned by you, and skips symlinks and files not owned by you; an explicit file that is a symlink, not yours, or inside a group- or world-writable directory prints a warning. There is no interactive confirmation, because `! tin-can` has no terminal to ask on.

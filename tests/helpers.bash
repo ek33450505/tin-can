@@ -16,7 +16,7 @@ TC_BASH="${TIN_CAN_TEST_BASH:-$BASH}"
 # where seq is a global counter, so the most recent call is well defined.
 make_stubs() {
   local pair name upper
-  for pair in cmux:CMUX tmux:TMUX claude:CLAUDE codex:CODEX; do
+  for pair in cmux:CMUX tmux:TMUX claude:CLAUDE codex:CODEX wezterm:WEZTERM kitten:KITTEN; do
     name="${pair%%:*}"
     upper="${pair##*:}"
     printf '%s\n' \
@@ -58,7 +58,8 @@ setup() {
   TC_PATH="$STUBS:$TOOLS"
 
   unset CMUX_WORKSPACE_ID TMUX TIN_CAN_AGENT TIN_CAN_TERM TIN_CAN_DIR
-  unset STUB_EXIT_CMUX STUB_EXIT_TMUX STUB_EXIT_CLAUDE STUB_EXIT_CODEX
+  unset WEZTERM_PANE KITTY_WINDOW_ID ZELLIJ ZELLIJ_SESSION_NAME
+  unset STUB_EXIT_CMUX STUB_EXIT_TMUX STUB_EXIT_CLAUDE STUB_EXIT_CODEX STUB_EXIT_WEZTERM STUB_EXIT_KITTEN
 
   HF="$TEST_ROOT/handoff.md"
   printf '# handoff\n\n## KICKOFF\nDo the thing.\n' >"$HF"
