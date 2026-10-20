@@ -8,13 +8,24 @@
 #               handoff file directly into the handoff directory, tell the user
 #               (systemMessage) and the model (additionalContext) the exact
 #               `! tin-can '<path>'` command that launches it.
-#   Any other event exits 0 silently (prompt and stop are added later).
+#   prompt      UserPromptSubmit. When the prompt sounds like a wrap-up ("wrap
+#               up", "hand off", "done for the day", ...), tell the model to
+#               write a handoff if work is unfinished, and set the `wrapup`
+#               state flag. A bare "tin-can" does not match.
+#   stop        Stop. If `wrapup` was set (it is always cleared), block once per
+#               session when the repo in .cwd has uncommitted files or unpushed
+#               commits and no handoff was written or announced. Never blocks
+#               without a valid session_id (no state, no once-per-session).
+#   Any other event exits 0 silently.
 #
 # Environment:
 #   TIN_CAN_HOOKS=0      disable the hook entirely
 #   TIN_CAN_DIR          handoff directory (default ~/.claude/resume-prompts)
 #   CLAUDE_PLUGIN_DATA   state root (default $TMPDIR or /tmp); state lives in
-#                        <root>/tin-can-hook/<session_id>/handoff
+#                        <root>/tin-can-hook/<session_id>/ with files:
+#                          handoff  path of the handoff written this session
+#                          wrapup   a wrap-up prompt was seen this turn
+#                          blocked  the stop hook already blocked once
 #
 # A hook must never break the session, so this script fails open: any problem
 # (no jq, bad JSON, unexpected values, state errors) exits 0 with no output.
@@ -51,35 +62,126 @@ canon_dir() {
   CANON="${out%$'\n'}"
 }
 
-# jq_field FILTER -> sets FIELD to the raw string value, newlines preserved.
+# jq_field [JQ_ARGS...] FILTER -> sets FIELD to the raw string value, newlines
+# preserved. The filter is the last argument.
 jq_field() {
   local out
-  out="$(printf '%s' "$INPUT" | jq -r "$1" 2>/dev/null && printf x)" || return 1
+  out="$(printf '%s' "$INPUT" | jq -r "$@" 2>/dev/null && printf x)" || return 1
   out="${out%x}"
   FIELD="${out%$'\n'}"
 }
 
-# Record the handoff path for the stop event. Best effort: never fails the hook.
-record_state() {
-  local sid="$1" file="$2" root base sdir tmp
+# state_dir SID [create] -> sets SDIR to the validated per-session state dir.
+# Refuses bad ids, symlinked or not-owned dirs. Without "create" the dir must
+# already exist. Best effort: returns 1 on any problem.
+state_dir() {
+  local sid="$1" root base
   case "$sid" in
-    "" | *[!A-Za-z0-9_-]*) return 0 ;;
+    "" | *[!A-Za-z0-9_-]*) return 1 ;;
   esac
-  [ "${#sid}" -le 64 ] || return 0
+  [ "${#sid}" -le 64 ] || return 1
   root="${CLAUDE_PLUGIN_DATA:-${TMPDIR:-/tmp}}"
   base="$root/tin-can-hook"
-  sdir="$base/$sid"
+  SDIR="$base/$sid"
   umask 077
-  mkdir -p "$base" 2>/dev/null || return 0
-  [ -d "$base" ] && [ ! -L "$base" ] && [ -O "$base" ] || return 0
-  mkdir -p "$sdir" 2>/dev/null || return 0
-  [ -d "$sdir" ] && [ ! -L "$sdir" ] && [ -O "$sdir" ] || return 0
-  tmp="$(mktemp "$sdir/.handoff.XXXXXX" 2>/dev/null)" || return 0
-  if printf '%s\n' "$file" >"$tmp" 2>/dev/null; then
-    mv -f "$tmp" "$sdir/handoff" 2>/dev/null || rm -f "$tmp"
+  if [ "${2:-}" = create ]; then
+    mkdir -p "$base" 2>/dev/null || return 1
+  fi
+  [ -d "$base" ] && [ ! -L "$base" ] && [ -O "$base" ] || return 1
+  if [ "${2:-}" = create ]; then
+    mkdir -p "$SDIR" 2>/dev/null || return 1
+  fi
+  [ -d "$SDIR" ] && [ ! -L "$SDIR" ] && [ -O "$SDIR" ] || return 1
+  return 0
+}
+
+# state_write NAME VALUE -> atomically write a state file in SDIR (from state_dir).
+state_write() {
+  local tmp
+  tmp="$(mktemp "$SDIR/.$1.XXXXXX" 2>/dev/null)" || return 1
+  if printf '%s\n' "$2" >"$tmp" 2>/dev/null; then
+    mv -f "$tmp" "$SDIR/$1" 2>/dev/null || {
+      rm -f "$tmp"
+      return 1
+    }
   else
     rm -f "$tmp"
+    return 1
   fi
+}
+
+# Record the handoff path for the stop event. Best effort: never fails the hook.
+record_state() {
+  state_dir "$1" create || return 0
+  state_write handoff "$2" || true
+  return 0
+}
+
+# Wrap-up phrases (jq/Oniguruma regex, lowercase input). High-precision phrases
+# match anywhere. Ambiguous verbs ("wrap up", "close out", "hand off") match only
+# when they end a clause, so "wrap up this function" does not. A bare "tin-can"
+# or "handoff" is deliberately not a phrase.
+WRAPUP_RE='\b(done for (the day|today|tonight|now)|call it a (day|night)|signing off|that'"'"'?s (it|all) for (today|now|tonight)|end (the|this) session|pick (this|it) up (later|tomorrow)|stopping (here|for (the day|today|now|tonight))|tin-can (this|it)|(wrap|close) (it |things |this session |the session )?(up|out) for (the day|today|tonight|now)|(wrap(ping)? (it |things )?up|clos(e|ing) (it |things )?out|hand (it |this )?off)( here| now)?[ \t]*([.!?,;]|$))'
+
+prompt_event() {
+  local sid ctx
+  # shellcheck disable=SC2016 # $re is a jq variable
+  jq_field --arg re "$WRAPUP_RE" '.prompt // "" | strings | ascii_downcase | test($re)' || return 0
+  if [ "$FIELD" != true ]; then
+    jq_field '.session_id // empty | strings' || return 0
+    state_dir "$FIELD" && rm -f "$SDIR/wrapup" 2>/dev/null
+    return 0
+  fi
+  ctx="tin-can: the user may be wrapping up this session. If any work is unfinished (uncommitted changes, open next steps), write a handoff with the tin-can skill and end your reply with the line \`! tin-can '<absolute path>'\`. If everything is finished and committed, say so briefly instead."
+  jq -n --arg ctx "$ctx" \
+    '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $ctx}}' 2>/dev/null || return 0
+  jq_field '.session_id // empty | strings' || return 0
+  sid="$FIELD"
+  if state_dir "$sid" create; then
+    state_write wrapup 1 || true
+  fi
+  return 0
+}
+
+stop_event() {
+  local sid had=0 cwd dirty ahead msg
+  jq_field '.session_id // empty | strings' || return 0
+  sid="$FIELD"
+  state_dir "$sid" || return 0
+  [ -e "$SDIR/wrapup" ] && had=1
+  rm -f "$SDIR/wrapup" 2>/dev/null
+  [ "$had" = 1 ] || return 0
+  jq_field '.stop_hook_active // false | tostring' || return 0
+  [ "$FIELD" = true ] && return 0
+  [ -e "$SDIR/handoff" ] && return 0
+  [ -e "$SDIR/blocked" ] && return 0
+  jq_field '.last_assistant_message // "" | strings' || return 0
+  case "$FIELD" in
+    *'! tin-can '*) return 0 ;;
+  esac
+  jq_field '.cwd // empty | strings' || return 0
+  cwd="$FIELD"
+  command -v git >/dev/null 2>&1 || return 0
+  [ -n "$cwd" ] && [ -d "$cwd" ] || return 0
+  GIT_OPTIONAL_LOCKS=0 git -C "$cwd" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+  dirty="$(GIT_OPTIONAL_LOCKS=0 git -C "$cwd" -c core.fsmonitor=false status --porcelain 2>/dev/null | wc -l)" || return 0
+  dirty=$((${dirty//[!0-9]/} + 0))
+  if GIT_OPTIONAL_LOCKS=0 git -C "$cwd" rev-parse --verify -q '@{u}' >/dev/null 2>&1; then
+    ahead="$(GIT_OPTIONAL_LOCKS=0 git -C "$cwd" rev-list --count '@{u}..HEAD' 2>/dev/null)" || ahead=0
+  elif [ -n "$(GIT_OPTIONAL_LOCKS=0 git -C "$cwd" remote 2>/dev/null)" ]; then
+    ahead="$(GIT_OPTIONAL_LOCKS=0 git -C "$cwd" rev-list --count HEAD --not --remotes 2>/dev/null)" || ahead=0
+  else
+    ahead=0
+  fi
+  ahead=$((${ahead//[!0-9]/} + 0))
+  [ "$dirty" -gt 0 ] || [ "$ahead" -gt 0 ] || return 0
+  state_write blocked 1 || return 0
+  # Only a sanitised basename goes into the model-facing reason.
+  local LC_ALL=C name="${cwd%/}"
+  name="${name##*/}"
+  name="${name//[^[:print:]]/?}"
+  msg="tin-can: this looks like the end of the session, but work is unfinished ($dirty uncommitted file(s), $ahead unpushed commit(s) in repo '$name') and no handoff was written. Write a handoff with the tin-can skill and end your reply with the line ! tin-can '<path>', or say in one sentence why none is needed."
+  jq -n --arg r "$msg" '{decision: "block", reason: $r}' 2>/dev/null || return 0
   return 0
 }
 
@@ -142,6 +244,8 @@ main() {
   INPUT="$(cat 2>/dev/null || true)"
   case "${1:-}" in
     post-write) post_write ;;
+    prompt) prompt_event ;;
+    stop) stop_event ;;
     *) ;;
   esac
   return 0
