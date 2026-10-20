@@ -14,7 +14,7 @@ Maintainers may edit, remove, or reject contributions, comments, or other conten
 ## Reporting
 
 - For public matters, open a GitHub Issue labeled **`conduct`**.
-- For private or sensitive matters, use [GitHub Security Advisories](https://github.com/ek33450505/tin-can/security/advisories/new) to contact maintainers confidentially.
+- For private or sensitive matters, use the [private reporting form](https://github.com/ek33450505/tin-can/security/advisories/new) and start the title with "Conduct report:". Only you and the maintainers can see it.
 
 ## Reference
 
