@@ -377,6 +377,43 @@ load helpers
   [[ "$output" == *"tin-can: using $RESUME/real.md"* ]]
 }
 
+@test "handoff: *-auto.md is excluded even when newest and repo-named" {
+  printf 'n\n' >"$RESUME/2026-01-01-myrepo-next.md"
+  printf 'a\n' >"$RESUME/2026-01-02-myrepo-auto.md"
+  set_mtime "$RESUME/2026-01-01-myrepo-next.md" 202601010000
+  set_mtime "$RESUME/2026-01-02-myrepo-auto.md" 202601020000
+  run_tc --latest --cwd "$WORK" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"tin-can: using $RESUME/2026-01-01-myrepo-next.md"* ]]
+}
+
+@test "handoff: only *-auto.md files present exits 2" {
+  printf 'a\n' >"$RESUME/2026-01-02-myrepo-auto.md"
+  run_tc --latest --cwd "$TEST_ROOT" --term print
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"no handoff file found"* ]]
+}
+
+@test "handoff: near-miss auto names stay eligible" {
+  local n
+  for n in autopilot.md my-auto-notes.md auto.md; do
+    rm -f "$RESUME"/*.md
+    printf 'o\n' >"$RESUME/old.md"
+    printf 'n\n' >"$RESUME/$n"
+    set_mtime "$RESUME/old.md" 202601010000
+    set_mtime "$RESUME/$n" 202601020000
+    run_tc --latest --cwd "$TEST_ROOT" --term print
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"tin-can: using $RESUME/$n"* ]] || return 1
+  done
+}
+
+@test "handoff: explicit x-auto.md file is still accepted" {
+  printf 'a\n' >"$RESUME/x-auto.md"
+  run_tc "$RESUME/x-auto.md" --cwd "$TEST_ROOT" --term print
+  [ "$status" -eq 0 ]
+}
+
 @test "handoff: only excluded files present exits 2" {
   printf 's\n' >"$RESUME/superseded-x.md"
   printf 't\n' >"$RESUME/_TEMPLATE.md"

@@ -77,8 +77,9 @@ Options:
 
 HANDOFF_FILE: an existing readable file. It is required unless --latest is
 given; giving both is an error (exit 2). --latest takes the newest *.md in the
-search directory (names starting with "superseded-" or "_" are skipped; files
-whose name contains the --cwd directory's name as a whole word are preferred).
+search directory (names starting with "superseded-" or "_", or ending in
+"-auto.md", are skipped; files whose name contains the --cwd directory's name
+as a whole word are preferred).
 Auto-selection refuses a search directory that is group/world-writable or not
 owned by you, and skips symlinks and files not owned by you. Whoever can write
 there steers the next session: review the chosen file (use --dry-run) before
@@ -217,7 +218,7 @@ find_handoff() {
     fi
     name="${f##*/}"
     case "$name" in
-      superseded-* | _*) continue ;;
+      superseded-* | _* | *-auto.md) continue ;;
     esac
     if has_ctrl "$name" || [ -L "$f" ]; then
       skipped=$((skipped + 1))
