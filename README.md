@@ -98,6 +98,7 @@ Other tools approach the same problem, mostly aimed at Claude Code and tmux:
 
 ## Changes
 
+- **0.1.2**: `--latest` skips names ending in `-auto.md` (auto-generated resume scaffolds); an explicit `HANDOFF_FILE` with that ending is still accepted. Paths containing Unicode tag characters (U+E0000-U+E007F) or lookalike spaces (U+00A0, U+2000-U+200A, U+202F, U+205F, U+3000), which were accepted before, are now refused like the other disguising characters. A failed launch's error output is indented and shown with every byte other than printable ASCII, newline and tab replaced by `?`. `--dry-run` shows the directory, handoff and launch arguments escaped, so an ordinary path with a space now appears as `my\ project`; the `command:` line stays raw so it can be pasted, and a stderr note flags a command containing non-ASCII characters (also with `--term print` and after a failed launch). If bats itself runs on bash 3.2, every test now fails in setup with an explanation.
 - **0.1.1**: **breaking:** auto-selecting the newest handoff now needs `--latest`. A bare `tin-can`, or `tin-can --dry-run` without a file, exits 2 instead of guessing, and giving both a file and `--latest` also exits 2. The left-to-right, right-to-left and Arabic letter marks (U+200E, U+200F, U+061C) are refused in paths like the other bidi controls. Paths in tin-can's own error and warning messages, and in the `using` line, are shown shell-escaped (`printf %q`).
 - **0.1.0**: first version.
 
