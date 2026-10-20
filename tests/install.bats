@@ -111,9 +111,34 @@ teardown() {
   [[ "$output" != *"linked:  $TIN_CAN_BIN_DIR"* ]]
 }
 
+@test "install: runs directly (not via bash) and --help exits 0" {
+  run "$REPO/install.sh" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--no-skill"* ]] || return 1
+  [[ "$output" == *"checkout's files."* ]] || return 1
+  [[ "$output" != *"set -euo"* ]] || return 1
+}
+
 @test "install: unknown argument exits 2" {
   run bash "$REPO/install.sh" --bogus
   [ "$status" -eq 2 ]
+}
+
+@test "install: --no-skill links the binary but not the skill" {
+  run bash "$REPO/install.sh" --no-skill
+  [ "$status" -eq 0 ]
+  [ "$(readlink "$TIN_CAN_BIN_DIR/tin-can")" = "$REPO/bin/tin-can" ]
+  [ ! -e "$CLAUDE_SKILLS_DIR/tin-can" ]
+  [ ! -L "$CLAUDE_SKILLS_DIR/tin-can" ]
+  [[ "$output" == *"skip:    skill (--no-skill; the Claude Code plugin provides it)"* ]] || return 1
+}
+
+@test "uninstall: --no-skill still removes a skill link that points here" {
+  bash "$REPO/install.sh" >/dev/null
+  run bash "$REPO/install.sh" --no-skill --uninstall
+  [ "$status" -eq 0 ]
+  [ ! -L "$CLAUDE_SKILLS_DIR/tin-can" ]
+  [ ! -L "$TIN_CAN_BIN_DIR/tin-can" ]
 }
 
 @test "uninstall: removes our links and leaves foreign files alone" {

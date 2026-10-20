@@ -49,6 +49,8 @@ Do not run tin-can yourself, and do not try to open terminal tabs or reach any t
 ! tin-can <absolute path to the handoff file>
 ```
 
+If the tin-can plugin hooks are installed, they also surface the launch line when the handoff is written; end your reply with it anyway.
+
 Tell them to run it from the repository the handoff is for, or add `--cwd <repo>`; the new session starts in that directory.
 
 Mention the options that may matter:

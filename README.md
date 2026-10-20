@@ -16,6 +16,7 @@ From a clone of this repository (symlinks only, no copying, no sudo):
 
 ```bash
 ./install.sh              # links bin/tin-can into ~/.local/bin and the skill into ~/.claude/skills
+./install.sh --no-skill   # link only the binary (the Claude Code plugin provides the skill)
 ./install.sh --uninstall  # removes links that point exactly at this checkout's files
 ./install.sh --force      # repoint an existing symlink that points somewhere else
 ```
@@ -23,6 +24,37 @@ From a clone of this repository (symlinks only, no copying, no sudo):
 Override locations with `TIN_CAN_BIN_DIR` and `CLAUDE_SKILLS_DIR`. The installer will not overwrite a regular file or directory, and refuses a symlink that points elsewhere unless you pass `--force`. Make sure `~/.local/bin` is on your `PATH`. Requires bash 3.2 or newer (the macOS system bash works).
 
 Because these are symlinks, the live `tin-can` binary and the auto-loaded `SKILL.md` are the files in your checkout: anything that can write to that directory (a `git pull`, another tool, an agent) changes what runs and what Claude Code is told. Treat the checkout like any other code you execute.
+
+## Claude Code plugin (optional)
+
+The plugin adds the skill plus three hooks that make handoffs harder to forget:
+
+- After a handoff is written to the handoff dir, it shows `! tin-can '<path>'`.
+- On a wrap-up phrase ("let's wrap up", "call it a day", "done for today"...), it asks the model to write a handoff if work is unfinished.
+- At the end of such a turn, if git shows uncommitted or unpushed work and no handoff was written, it asks once per session.
+
+Installing the plugin means Claude Code runs `hooks/tin-can-hook` automatically, as you, on every prompt, every Write/Edit/MultiEdit and every turn end. Read the script before you install it. The hooks only print a command or advise the model; they never launch anything.
+
+Install, pinned to a release tag (recommended):
+
+```
+/plugin marketplace add ek33450505/tin-can#v0.2.0
+/plugin install tin-can@tin-can
+```
+
+An unpinned `/plugin marketplace add ek33450505/tin-can` follows the default branch. Updates reach you only when the plugin's version changes, through `/plugin marketplace update tin-can` or auto-update if you enable it.
+
+The binary still comes from `./install.sh --no-skill` (the plugin provides the skill, and you don't want two copies).
+
+Requires `jq` (without it the hooks silently do nothing). `TIN_CAN_HOOKS=0` disables the hooks.
+
+Limits:
+
+- A hard `/exit` or closing the tab gives the model no turn, so no hook can force a handoff.
+- The git check only sees the session's working directory.
+- Wrap-up detection is a phrase list: it misses other wordings, and "wrap it up, then ..." can match.
+- It nudges at most once per session.
+- Claude Code's docs don't confirm that a PostToolUse hook's `systemMessage` is displayed. The same command is also given to the model so it ends its reply with it.
 
 ## Usage
 
@@ -70,6 +102,7 @@ The command run in the new terminal is `cd 'DIR' && exec 'AGENT' 'PROMPT'`, buil
 - File contents are never interpolated into a shell command. The directory, agent name and prompt are each single-quoted, and paths with control characters are refused outright. The test suite round-trips paths containing spaces, quotes, `$`, backticks, glob and shell metacharacters, a leading `-`, and non-ASCII text (including under `LC_ALL=C`) through bash, zsh and dash.
 - **Whoever can write into the handoff directory steers the next session.** The new agent will read the chosen file and may act on it. `--latest` picks the newest file, or the newest whose name contains the repository name, so a file dropped into that directory can win. Mitigations in the tool: auto-selection refuses a directory that is group- or world-writable or not owned by you, and skips symlinks and files not owned by you; an explicit file that is a symlink, not yours, or inside a group- or world-writable directory prints a warning. There is no interactive confirmation, because `! tin-can` has no terminal to ask on.
 - `--dry-run` shows the directory, handoff and launch arguments escaped, and the `command:` line raw so it can be pasted. When that command, or the one printed by `--term print` or after a failed launch, contains non-ASCII characters, a note on stderr says so. A failed launch's error output is indented and shown with every byte other than printable ASCII, newline and tab replaced by `?`.
+- The optional plugin hooks run automatically, but they only print a command or ask the model to write a handoff. They never launch a session, and `TIN_CAN_HOOKS=0` turns them off.
 - Read the handoff before launching it, especially one written by an agent: with `--latest`, run `tin-can --latest --dry-run` first to see which file would be used, then open it.
 
 ## Known limitations

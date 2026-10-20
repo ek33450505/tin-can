@@ -1,0 +1,14 @@
+{
+  "name": "tin-can",
+  "owner": {
+    "name": "Edward Kubiak"
+  },
+  "description": "Hand a coding session off to a fresh terminal tab.",
+  "plugins": [
+    {
+      "name": "tin-can",
+      "source": "./",
+      "description": "Hand a coding session off to a fresh terminal tab: the skill writes the handoff, hooks print the launch command."
+    }
+  ]
+}
