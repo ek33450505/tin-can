@@ -30,6 +30,6 @@ When the user asks to hand off, continue in a new session, or "tin-can" the work
    ```
 
    Reference files by path, never paste secrets. Save it as `~/.claude/resume-prompts/YYYY-MM-DD-<repo>-<slug>.md`, or at a path the user names.
-2. **Tell the user to launch it.** Reply with the absolute path, ask them to read the file first, then run `tin-can <path>` themselves (add `--agent codex` to start Codex, `--where window` for a new window, `--dry-run` to preview).
+2. **Tell the user to launch it.** Reply with the absolute path, ask them to read the file first, then run `tin-can <path>` themselves (add `--agent codex` to start Codex, `--where window` for a new window, `--dry-run` to preview). The new session starts in the directory they run it from, so tell them to run it from the repository the handoff is for, or to add `--cwd <repo>`.
 
 Do not run `tin-can` yourself and do not try to open terminal tabs or access terminal control sockets. The user triggers the launch.

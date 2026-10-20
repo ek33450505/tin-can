@@ -49,10 +49,15 @@ Do not run tin-can yourself, and do not try to open terminal tabs or reach any t
 ! tin-can <absolute path to the handoff file>
 ```
 
+If the tin-can plugin hooks are installed, they also surface the launch line when the handoff is written; end your reply with it anyway.
+
+Tell them to run it from the repository the handoff is for, or add `--cwd <repo>`; the new session starts in that directory.
+
 Mention the options that may matter:
 
 - `--agent codex` to start a different agent (default `claude`).
 - `--where window` to open a new window/workspace instead of a tab.
+- `--list` to see which handoffs `--latest` would consider.
 - `--dry-run` to preview the command without launching anything.
 
 If tin-can is not installed, say so and point to `install.sh` in the tin-can repository rather than working around it.

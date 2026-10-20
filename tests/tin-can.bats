@@ -232,7 +232,7 @@ load helpers
   [[ "$output" == *"Usage: tin-can"* ]]
   [[ "$output" == *"claude | codex"* ]]
   [[ "$output" == *"--latest"* ]]
-  [[ "$output" == *"cmux | tmux | print | auto"* ]]
+  [[ "$output" == *"cmux | tmux | zellij | wezterm | kitty | print | auto"* ]]
 }
 
 @test "latest: no file and no --latest exits 2, names --latest, launches nothing" {
@@ -685,7 +685,8 @@ load helpers
 }
 
 @test "trust: an explicit regular file does not warn" {
-  run_tc --cwd "$WORK" --term print "$HF"
+  printf 'a\n' >"$RESUME/myrepo-trust.md"
+  run_tc --cwd "$WORK" --term print "$RESUME/myrepo-trust.md"
   [ "$status" -eq 0 ]
   [[ "$output" != *"WARNING"* ]]
 }
@@ -1254,4 +1255,456 @@ raw_path_sites() {
   [[ "$output" != *"non-ASCII"* ]] || return 1
   run_tc --term print --cwd "$WORK" "$HF"
   [[ "$output" != *"non-ASCII"* ]] || return 1
+}
+
+@test "wrong folder: explicit handoff not named for the cwd warns, still launches" {
+  printf 'a\n' >"$RESUME/2026-01-01-other-next.md"
+  run_tc "$RESUME/2026-01-01-other-next.md" --cwd "$WORK" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"does not look like it belongs to"* ]]
+}
+
+@test "wrong folder: handoff named for the cwd repo does not warn" {
+  printf 'a\n' >"$RESUME/2026-01-01-myrepo-next.md"
+  run_tc "$RESUME/2026-01-01-myrepo-next.md" --cwd "$WORK" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"does not look like it belongs to"* ]]
+}
+
+@test "wrong folder: handoff inside the cwd does not warn" {
+  mkdir -p "$WORK/docs"
+  printf 'a\n' >"$WORK/docs/NEXT-SESSION.md"
+  run_tc "$WORK/docs/NEXT-SESSION.md" --cwd "$WORK" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"does not look like it belongs to"* ]]
+}
+
+@test "wrong folder: repo name must be a whole word in the handoff name" {
+  printf 'a\n' >"$RESUME/myrepository-next.md"
+  printf 'b\n' >"$RESUME/x_myrepo.md"
+  run_tc "$RESUME/myrepository-next.md" --cwd "$WORK" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"does not look like it belongs to"* ]] || return 1
+  run_tc "$RESUME/x_myrepo.md" --cwd "$WORK" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"does not look like it belongs to"* ]]
+}
+
+@test "wrong folder: --latest falling back to an unrelated file warns" {
+  printf 'a\n' >"$RESUME/other-notes.md"
+  run_tc --latest --cwd "$WORK" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"tin-can: using $RESUME/other-notes.md"* ]] || return 1
+  [[ "$output" == *"does not look like it belongs to"* ]]
+}
+
+@test "wrong folder: --dry-run still warns and launches nothing" {
+  printf 'a\n' >"$RESUME/2026-01-01-other-next.md"
+  run_tc "$RESUME/2026-01-01-other-next.md" --cwd "$WORK" --term tmux --dry-run
+  [ "$status" -eq 0 ]
+  [ "$(total_calls)" -eq 0 ]
+  [[ "$output" == *"does not look like it belongs to"* ]]
+}
+
+@test "wrong folder: --cwd / has no repo name, so no warning" {
+  printf 'a\n' >"$RESUME/2026-01-01-other-next.md"
+  run_tc "$RESUME/2026-01-01-other-next.md" --cwd / --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"does not look like it belongs to"* ]]
+}
+
+@test "wrong folder: a sibling directory sharing the cwd prefix is not inside it" {
+  mkdir -p "$TEST_ROOT/work/myrepo2"
+  printf 'a\n' >"$TEST_ROOT/work/myrepo2/notes.md"
+  run_tc "$TEST_ROOT/work/myrepo2/notes.md" --cwd "$WORK" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"does not look like it belongs to"* ]]
+}
+
+# --- --list --------------------------------------------------------------------
+
+@test "list: newest first, * on the --latest pick, + on repo-named files" {
+  printf 'a\n' >"$RESUME/2026-01-03-other.md"
+  printf 'b\n' >"$RESUME/2026-01-02-myrepo-next.md"
+  printf 'c\n' >"$RESUME/2026-01-01-zeta.md"
+  set_mtime "$RESUME/2026-01-03-other.md" 202601030000
+  set_mtime "$RESUME/2026-01-02-myrepo-next.md" 202601020000
+  set_mtime "$RESUME/2026-01-01-zeta.md" 202601010000
+  run_tc --list --cwd "$WORK" --term print
+  [ "$status" -eq 0 ]
+  [[ "${lines[0]}" == *"newest first (* = --latest would pick it, + = named for myrepo)" ]] || return 1
+  [ "${lines[1]}" = "    2026-01-03-other.md" ]
+  [ "${lines[2]}" = "* + 2026-01-02-myrepo-next.md" ]
+  [ "${lines[3]}" = "    2026-01-01-zeta.md" ]
+  [ "${#lines[@]}" -eq 4 ]
+  [ "$(total_calls)" -eq 0 ]
+}
+
+@test "list: the * mark names the file --latest picks (repo match and none)" {
+  local cwd
+  printf 'a\n' >"$RESUME/new-other.md"
+  printf 'b\n' >"$RESUME/old-myrepo.md"
+  set_mtime "$RESUME/new-other.md" 202601030000
+  set_mtime "$RESUME/old-myrepo.md" 202601010000
+  for cwd in "$WORK" "$TEST_ROOT"; do
+    run_tc --list --cwd "$cwd" --term print
+    [ "$status" -eq 0 ]
+    local star="" l stars=0
+    for l in "${lines[@]}"; do
+      if [[ "$l" == "* "* ]]; then
+        star="${l:4}"
+        stars=$((stars + 1))
+      fi
+    done
+    [ "$stars" -eq 1 ]
+    run_tc --latest --dry-run --cwd "$cwd" --term print
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"tin-can: using $RESUME/$star"* ]] || return 1
+  done
+}
+
+@test "list: shows at most 10 files then '... and N more'" {
+  local i
+  for i in 01 02 03 04 05 06 07 08 09 10 11 12; do
+    printf 'x\n' >"$RESUME/f$i.md"
+    set_mtime "$RESUME/f$i.md" "2026010100$i"
+  done
+  run_tc --list --cwd "$TEST_ROOT" --term print
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 12 ]
+  [ "${lines[11]}" = "  ... and 2 more" ]
+  [[ "${lines[1]}" == "* "*f12.md ]]
+}
+
+@test "list: skipped counts separate by-name from unsafe" {
+  printf 'x\n' >"$RESUME/real.md"
+  printf 'x\n' >"$RESUME/superseded-a.md"
+  printf 'x\n' >"$RESUME/_b.md"
+  printf 'x\n' >"$RESUME/c-auto.md"
+  printf 'x\n' >"$TEST_ROOT/target.md"
+  ln -s "$TEST_ROOT/target.md" "$RESUME/link.md"
+  run_tc --list --cwd "$TEST_ROOT" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"skipped: 3 by name (superseded-*, _*, *-auto.md); 1 unsafe (symlink, not owned by you, or unsafe name)"* ]] || return 1
+  [[ "$output" != *"c-auto.md"* ]] || return 1
+  [[ "$output" != *"link.md"* ]] || return 1
+}
+
+@test "list: equal modification times are listed in file-name order" {
+  printf 'a\n' >"$RESUME/a.md"
+  printf 'b\n' >"$RESUME/b.md"
+  set_mtime "$RESUME/a.md" 202610010000
+  set_mtime "$RESUME/b.md" 202610010000
+  run_tc --list --cwd "$TEST_ROOT" --term print
+  [ "$status" -eq 0 ]
+  [ "${lines[1]}" = "*   a.md" ]
+  [ "${lines[2]}" = "    b.md" ]
+}
+
+@test "list: no candidates prints (no candidates) and exits 0" {
+  run_tc --list --cwd "$TEST_ROOT" --term print
+  [ "$status" -eq 0 ]
+  [ "${lines[1]}" = "(no candidates)" ]
+  [ "${#lines[@]}" -eq 2 ]
+}
+
+@test "list: a world-writable search dir is refused like --latest" {
+  printf 'x\n' >"$RESUME/real.md"
+  chmod 777 "$RESUME"
+  run_tc --list --cwd "$WORK" --term print
+  chmod 755 "$RESUME"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"group- or world-writable"* ]]
+}
+
+@test "list: combining --list with a file or --latest exits 2" {
+  printf 'x\n' >"$RESUME/real.md"
+  run_tc --list "$RESUME/real.md" --cwd "$WORK" --term print
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--list cannot be combined"* ]] || return 1
+  run_tc --list --latest --cwd "$WORK" --term print
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--list cannot be combined"* ]] || return 1
+  [ "$(total_calls)" -eq 0 ]
+}
+
+@test "list: a file name with ZWSP is shown escaped, never raw" {
+  local z
+  z="$(printf '\342\200\213')"
+  printf 'x\n' >"$RESUME/a${z}b.md"
+  run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --list --cwd "$WORK" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'\342\200\213'* ]] || return 1
+  [[ "$output" != *"$z"* ]]
+}
+
+@test "list: the --latest pick is shown once even when older than the newest 10" {
+  local i
+  for i in 01 02 03 04 05 06 07 08 09 10 11; do
+    printf 'x\n' >"$RESUME/f$i.md"
+    set_mtime "$RESUME/f$i.md" "2026010100$i"
+  done
+  printf 'x\n' >"$RESUME/oldest-myrepo.md"
+  set_mtime "$RESUME/oldest-myrepo.md" 202501010000
+  run_tc --list --cwd "$WORK" --term print
+  [ "$status" -eq 0 ]
+  local l stars=0
+  for l in "${lines[@]}"; do
+    if [[ "$l" == "* "* ]]; then stars=$((stars + 1)); fi
+  done
+  [ "$stars" -eq 1 ]
+  [ "${lines[1]}" = "    f11.md" ]
+  [ "${lines[10]}" = "    f02.md" ]
+  [ "${lines[11]}" = "* + oldest-myrepo.md" ]
+  [ "${lines[12]}" = "  ... and 1 more" ]
+  [ "${#lines[@]}" -eq 13 ]
+}
+
+# --- wezterm and kitty ---------------------------------------------------------
+
+@test "auto: WEZTERM_PANE + wezterm on PATH selects wezterm" {
+  export WEZTERM_PANE=3
+  run_tc --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(call_count wezterm)" -eq 1 ]
+  [ "$(total_calls)" -eq 1 ]
+}
+
+@test "auto: KITTY_WINDOW_ID + kitten on PATH selects kitty" {
+  export KITTY_WINDOW_ID=4
+  run_tc --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(call_count kitten)" -eq 1 ]
+  [ "$(total_calls)" -eq 1 ]
+}
+
+@test "auto: tmux wins over WEZTERM_PANE" {
+  export TMUX=/tmp/tmux-1/default,1,0 WEZTERM_PANE=3
+  run_tc --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(call_count tmux)" -eq 1 ]
+  [ "$(call_count wezterm)" -eq 0 ]
+}
+
+@test "auto: wezterm wins over kitty" {
+  export WEZTERM_PANE=3 KITTY_WINDOW_ID=4
+  run_tc --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(call_count wezterm)" -eq 1 ]
+  [ "$(call_count kitten)" -eq 0 ]
+}
+
+@test "auto: WEZTERM_PANE set but wezterm not on PATH prints" {
+  export WEZTERM_PANE=3
+  rm "$STUBS/wezterm"
+  run_tc --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(total_calls)" -eq 0 ]
+  [[ "$output" == *"exec 'claude'"* ]]
+}
+
+@test "auto: KITTY_WINDOW_ID set but kitten not on PATH prints" {
+  export KITTY_WINDOW_ID=4
+  rm "$STUBS/kitten"
+  run_tc --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(total_calls)" -eq 0 ]
+  [[ "$output" == *"exec 'claude'"* ]]
+}
+
+@test "wezterm tab: cli spawn -- sh -c CMD" {
+  run_tc --term wezterm --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  load_call wezterm
+  [ "${#ARGS[@]}" -eq 6 ]
+  [ "${ARGS[0]}" = "cli" ]
+  [ "${ARGS[1]}" = "spawn" ]
+  [ "${ARGS[2]}" = "--" ]
+  [ "${ARGS[3]}" = "sh" ]
+  [ "${ARGS[4]}" = "-c" ]
+  [ "${ARGS[5]}" = "$(tc_cmd --cwd "$WORK" "$HF")" ]
+}
+
+@test "wezterm window: cli spawn --new-window -- sh -c CMD" {
+  run_tc --term wezterm --where window --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  load_call wezterm
+  [ "${#ARGS[@]}" -eq 7 ]
+  [ "${ARGS[0]}" = "cli" ]
+  [ "${ARGS[1]}" = "spawn" ]
+  [ "${ARGS[2]}" = "--new-window" ]
+  [ "${ARGS[3]}" = "--" ]
+  [ "${ARGS[4]}" = "sh" ]
+  [ "${ARGS[5]}" = "-c" ]
+  [ "${ARGS[6]}" = "$(tc_cmd --cwd "$WORK" "$HF")" ]
+}
+
+@test "kitty tab: @ launch --type=tab sh -c CMD" {
+  run_tc --term kitty --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  load_call kitten
+  [ "${#ARGS[@]}" -eq 6 ]
+  [ "${ARGS[0]}" = "@" ]
+  [ "${ARGS[1]}" = "launch" ]
+  [ "${ARGS[2]}" = "--type=tab" ]
+  [ "${ARGS[3]}" = "sh" ]
+  [ "${ARGS[4]}" = "-c" ]
+  [ "${ARGS[5]}" = "$(tc_cmd --cwd "$WORK" "$HF")" ]
+}
+
+@test "kitty window: @ launch --type=os-window sh -c CMD" {
+  run_tc --term kitty --where window --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  load_call kitten
+  [ "${#ARGS[@]}" -eq 6 ]
+  [ "${ARGS[2]}" = "--type=os-window" ]
+  [ "${ARGS[3]}" = "sh" ]
+  [ "${ARGS[4]}" = "-c" ]
+  [ "${ARGS[5]}" = "$(tc_cmd --cwd "$WORK" "$HF")" ]
+}
+
+@test "failure: wezterm non-zero exits 1 with fallback" {
+  export STUB_EXIT_WEZTERM=1
+  run_tc --term wezterm --cwd "$WORK" "$HF"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"wezterm failed (exit 1)"* ]] || return 1
+  [[ "$output" == *"paste this into a new terminal tab"* ]] || return 1
+  [[ "$output" == *"exec 'claude' "* ]]
+}
+
+@test "failure: kitty non-zero exits 1 with fallback" {
+  export STUB_EXIT_KITTEN=1
+  run_tc --term kitty --cwd "$WORK" "$HF"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"kitty failed (exit 1)"* ]] || return 1
+  [[ "$output" == *"paste this into a new terminal tab"* ]] || return 1
+  [[ "$output" == *"exec 'claude' "* ]]
+}
+
+@test "dry-run: kitty launches nothing and shows kitten @ launch" {
+  run_tc --dry-run --term kitty --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(total_calls)" -eq 0 ]
+  [[ "$output" == *"kitten @ launch"* ]]
+}
+
+@test "roundtrip: wezterm and kitty sh -c CMD survives a hostile directory name" {
+  local d="$TEST_ROOT/rt/it's \$(id) dir" cdir t
+  mkdir -p "$d"
+  printf '# h\n\n## KICKOFF\nGo.\n' >"$d/h.md"
+  cdir="$(cd -P "$d" && pwd -P)"
+  for t in wezterm kitten; do
+    run_tc --term "${t/kitten/kitty}" --cwd "$d" "$d/h.md"
+    [ "$status" -eq 0 ]
+    load_call "$t"
+    env "PATH=$TC_PATH" /bin/sh -c "${ARGS[$((${#ARGS[@]} - 1))]}"
+    load_call claude
+    [ "$CALL_PWD" = "$cdir" ]
+    [ "${#ARGS[@]}" -eq 1 ]
+  done
+}
+
+# --- zellij --------------------------------------------------------------------
+
+@test "auto: ZELLIJ=0 + zellij on PATH selects zellij (0 counts as set)" {
+  export ZELLIJ=0
+  run_tc --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(call_count zellij)" -eq 1 ]
+  [ "$(total_calls)" -eq 1 ]
+}
+
+@test "auto: tmux wins over ZELLIJ" {
+  export TMUX=/tmp/tmux-1/default,1,0 ZELLIJ=0
+  run_tc --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(call_count tmux)" -eq 1 ]
+  [ "$(call_count zellij)" -eq 0 ]
+}
+
+@test "auto: zellij wins over WEZTERM_PANE" {
+  export ZELLIJ=0 WEZTERM_PANE=3
+  run_tc --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(call_count zellij)" -eq 1 ]
+  [ "$(call_count wezterm)" -eq 0 ]
+}
+
+@test "auto: ZELLIJ set but zellij not on PATH falls through" {
+  export ZELLIJ=0 WEZTERM_PANE=3
+  rm "$STUBS/zellij"
+  run_tc --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(call_count wezterm)" -eq 1 ]
+  [ "$(total_calls)" -eq 1 ]
+}
+
+@test "zellij tab: action new-tab --name 'REPO (tin-can)' -- sh -c CMD" {
+  run_tc --term zellij --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  load_call zellij
+  [ "${#ARGS[@]}" -eq 8 ]
+  [ "${ARGS[0]}" = "action" ]
+  [ "${ARGS[1]}" = "new-tab" ]
+  [ "${ARGS[2]}" = "--name" ]
+  [ "${ARGS[3]}" = "myrepo (tin-can)" ]
+  [ "${ARGS[4]}" = "--" ]
+  [ "${ARGS[5]}" = "sh" ]
+  [ "${ARGS[6]}" = "-c" ]
+  [ "${ARGS[7]}" = "$(tc_cmd --cwd "$WORK" "$HF")" ]
+  [[ "$output" == *"launched claude in a new zellij tab"* ]]
+}
+
+@test "zellij window: attach --create-background NAME -- sh -c CMD, and attach hint" {
+  run_tc --term zellij --where window --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  load_call zellij
+  [ "${#ARGS[@]}" -eq 7 ]
+  [ "${ARGS[0]}" = "attach" ]
+  [ "${ARGS[1]}" = "--create-background" ]
+  [[ "${ARGS[2]}" =~ ^tin-can-[0-9]+-[0-9]+$ ]] || return 1
+  [ "${ARGS[3]}" = "--" ]
+  [ "${ARGS[4]}" = "sh" ]
+  [ "${ARGS[5]}" = "-c" ]
+  [ "${ARGS[6]}" = "$(tc_cmd --cwd "$WORK" "$HF")" ]
+  [[ "$output" == *"launched claude in a new DETACHED zellij session; attach with: zellij attach ${ARGS[2]}"* ]]
+}
+
+@test "failure: zellij non-zero exits 1 with fallback" {
+  export STUB_EXIT_ZELLIJ=1
+  run_tc --term zellij --cwd "$WORK" "$HF"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"zellij failed (exit 1)"* ]] || return 1
+  [[ "$output" == *"paste this into a new terminal tab"* ]] || return 1
+  [[ "$output" == *"exec 'claude' "* ]]
+}
+
+@test "dry-run: zellij launches nothing and shows zellij action new-tab" {
+  run_tc --dry-run --term zellij --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(total_calls)" -eq 0 ]
+  [[ "$output" == *"zellij action new-tab"* ]]
+}
+
+@test "roundtrip: zellij sh -c CMD survives a hostile directory name" {
+  local d="$TEST_ROOT/rt/it's \$(id) dir" cdir
+  mkdir -p "$d"
+  printf '# h\n\n## KICKOFF\nGo.\n' >"$d/h.md"
+  cdir="$(cd -P "$d" && pwd -P)"
+  run_tc --term zellij --cwd "$d" "$d/h.md"
+  [ "$status" -eq 0 ]
+  load_call zellij
+  env "PATH=$TC_PATH" /bin/sh -c "${ARGS[$((${#ARGS[@]} - 1))]}"
+  load_call claude
+  [ "$CALL_PWD" = "$cdir" ]
+  [ "${#ARGS[@]}" -eq 1 ]
+}
+
+@test "help: every line is at most 80 columns" {
+  local l
+  run_tc --help
+  [ "$status" -eq 0 ]
+  for l in "${lines[@]}"; do
+    [ "${#l}" -le 80 ] || return 1
+  done
 }

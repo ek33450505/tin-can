@@ -1,0 +1,11 @@
+{
+  "name": "tin-can",
+  "version": "0.2.0",
+  "description": "Hand a coding session off to a fresh terminal tab: the skill writes the handoff, hooks print the launch command.",
+  "author": {
+    "name": "Edward Kubiak"
+  },
+  "repository": "https://github.com/ek33450505/tin-can",
+  "license": "MIT",
+  "keywords": ["handoff", "session", "terminal", "cmux", "tmux"]
+}

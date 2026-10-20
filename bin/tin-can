@@ -18,7 +18,7 @@ PROG="tin-can"
 # Single source for validation and --help. To add an agent: add its name here
 # (and a case branch in agent_binary only if its binary name differs).
 SUPPORTED_AGENTS="claude codex"
-SUPPORTED_TERMS="cmux tmux print auto"
+SUPPORTED_TERMS="cmux tmux zellij wezterm kitty print auto"
 
 die() {
   local code="$1"
@@ -56,6 +56,7 @@ usage() {
   cat <<EOF
 Usage: tin-can [options] HANDOFF_FILE
        tin-can [options] --latest
+       tin-can [options] --list
 
 Open a fresh AI coding session in a new terminal tab/window and tell it to
 read a handoff file. The only thing passed to the agent is one prompt naming
@@ -71,7 +72,8 @@ Options:
   --dir DIR        handoff search directory for --latest
                    (default: \$TIN_CAN_DIR or ~/.claude/resume-prompts)
   --latest         auto-select the newest handoff in the search dir
-  --dry-run        show what would run; launch nothing
+  --list           show the handoffs --latest would consider
+  --dry-run        show what would run (paths escaped); launch nothing
   --version        print version
   -h, --help       print this help
 
@@ -86,8 +88,11 @@ there steers the next session: review the chosen file (use --dry-run) before
 launching. Files with equal modification times are taken in file-name order.
 
 --term auto picks cmux if \$CMUX_WORKSPACE_ID is set and cmux is on PATH, else
-tmux if \$TMUX is set and tmux is on PATH, else print (the launch command is
-printed so you can paste it into a new tab).
+tmux if \$TMUX is set and tmux is on PATH, else zellij if \$ZELLIJ is set and
+zellij is on PATH, else wezterm if \$WEZTERM_PANE is set and wezterm is on
+PATH, else kitty if \$KITTY_WINDOW_ID is set and kitten is on PATH, else print
+(the launch command is printed so you can paste it into a new tab). kitty needs
+remote control enabled (see README; socket-only is safer than yes).
 
 Paths containing ASCII control characters (tab, newline, ESC, DEL), C1 controls
 (U+0080-U+009F), line/paragraph separators (U+2028-U+2029), bidi embeddings and
@@ -137,6 +142,12 @@ detect_term() {
     printf 'cmux'
   elif [ -n "${TMUX:-}" ] && command -v tmux >/dev/null 2>&1; then
     printf 'tmux'
+  elif [ -n "${ZELLIJ:-}" ] && command -v zellij >/dev/null 2>&1; then
+    printf 'zellij'
+  elif [ -n "${WEZTERM_PANE:-}" ] && command -v wezterm >/dev/null 2>&1; then
+    printf 'wezterm'
+  elif [ -n "${KITTY_WINDOW_ID:-}" ] && command -v kitten >/dev/null 2>&1; then
+    printf 'kitty'
   else
     printf 'print'
   fi
@@ -189,11 +200,27 @@ canon_dir() {
   CANON="${out%$'\n'}"
 }
 
-# find_handoff DIR REPO -> sets FOUND, or FIND_ERR and returns 1.
-find_handoff() {
-  local dir="$1" repo="$2" cdir wr f name norm nrepo
-  local best="" pref="" skipped=0
-  FOUND=""
+# name_has_repo NAME REPO: true when NAME (minus .md) contains REPO as a whole
+# word; '-', '_' and '.' all count as separators.
+name_has_repo() {
+  local norm nrepo
+  nrepo="${2//_/-}"
+  nrepo="${nrepo//./-}"
+  [ -n "$nrepo" ] || return 1
+  norm="${1%.md}"
+  norm="${norm//_/-}"
+  norm="${norm//./-}"
+  case "-$norm-" in
+    *"-$nrepo-"*) return 0 ;;
+  esac
+  return 1
+}
+
+# check_search_dir DIR -> sets CDIR (canonical search dir), or FIND_ERR and
+# returns 1 when the directory may not be searched.
+check_search_dir() {
+  local dir="$1" wr
+  CDIR=""
   FIND_ERR=""
   if [ ! -d "$dir" ]; then
     FIND_ERR="handoff search dir not found: $(shown "$dir") (pass HANDOFF_FILE or use --dir)"
@@ -203,57 +230,72 @@ find_handoff() {
     FIND_ERR="cannot enter handoff search dir: $(shown "$dir")"
     return 1
   fi
-  cdir="$CANON"
-  if has_ctrl "$cdir"; then
-    FIND_ERR="handoff search dir contains a control character: $(shown "$cdir")"
+  if has_ctrl "$CANON"; then
+    FIND_ERR="handoff search dir contains a control character: $(shown "$CANON")"
     return 1
   fi
-  if [ ! -O "$cdir" ]; then
-    FIND_ERR="refusing to auto-select from $(shown "$cdir"): not owned by you (an explicit HANDOFF_FILE is still allowed)"
+  if [ ! -O "$CANON" ]; then
+    FIND_ERR="refusing to auto-select from $(shown "$CANON"): not owned by you (an explicit HANDOFF_FILE is still allowed)"
     return 1
   fi
-  wr="$(find "$cdir" -maxdepth 0 \( -perm -0020 -o -perm -0002 \) -print 2>/dev/null || true)"
+  wr="$(find "$CANON" -maxdepth 0 \( -perm -0020 -o -perm -0002 \) -print 2>/dev/null || true)"
   if [ -n "$wr" ]; then
-    FIND_ERR="refusing to auto-select from $(shown "$cdir"): it is group- or world-writable (an explicit HANDOFF_FILE is still allowed)"
+    FIND_ERR="refusing to auto-select from $(shown "$CANON"): it is group- or world-writable (an explicit HANDOFF_FILE is still allowed)"
     return 1
   fi
+  CDIR="$CANON"
+}
 
-  nrepo="${repo//_/-}"
-  nrepo="${nrepo//./-}"
+# classify_candidate PATH -> sets KIND: ok (eligible), name (skipped by name),
+# unsafe (symlink, unsafe name or not owned by you) or ignore (unmatched glob,
+# directory, device, unreadable). A global, not a return code, because of set -e.
+classify_candidate() {
+  local f="$1" name="${1##*/}"
+  KIND="ok"
+  if [ ! -e "$f" ] && [ ! -L "$f" ]; then
+    KIND="ignore" # unmatched glob
+    return 0
+  fi
+  case "$name" in
+    superseded-* | _* | *-auto.md)
+      KIND="name"
+      return 0
+      ;;
+  esac
+  if has_ctrl "$name" || [ -L "$f" ]; then
+    KIND="unsafe"
+  elif [ ! -f "$f" ] || [ ! -r "$f" ]; then
+    KIND="ignore"
+  elif [ ! -O "$f" ]; then
+    KIND="unsafe"
+  fi
+  return 0
+}
+
+# find_handoff DIR REPO -> sets FOUND, or FIND_ERR and returns 1.
+find_handoff() {
+  local repo="$2" cdir f name
+  local best="" pref="" skipped=0
+  FOUND=""
+  check_search_dir "$1" || return 1
+  cdir="$CDIR"
+
   for f in "$cdir"/*.md; do
-    if [ ! -e "$f" ] && [ ! -L "$f" ]; then
-      continue # unmatched glob
-    fi
     name="${f##*/}"
-    case "$name" in
-      superseded-* | _* | *-auto.md) continue ;;
-    esac
-    if has_ctrl "$name" || [ -L "$f" ]; then
-      skipped=$((skipped + 1))
-      continue
-    fi
-    if [ ! -f "$f" ] || [ ! -r "$f" ]; then
-      continue # directory, device, unreadable
-    fi
-    if [ ! -O "$f" ]; then
-      skipped=$((skipped + 1))
-      continue
-    fi
-    if [ -z "$best" ] || [ "$f" -nt "$best" ]; then
-      best="$f"
-    fi
-    if [ -n "$nrepo" ]; then
-      norm="${name%.md}"
-      norm="${norm//_/-}"
-      norm="${norm//./-}"
-      case "-$norm-" in
-        *"-$nrepo-"*)
+    classify_candidate "$f"
+    case "$KIND" in
+      unsafe) skipped=$((skipped + 1)) ;;
+      ok)
+        if [ -z "$best" ] || [ "$f" -nt "$best" ]; then
+          best="$f"
+        fi
+        if name_has_repo "$name" "$repo"; then
           if [ -z "$pref" ] || [ "$f" -nt "$pref" ]; then
             pref="$f"
           fi
-          ;;
-      esac
-    fi
+        fi
+        ;;
+    esac
   done
   if [ -n "$pref" ]; then
     FOUND="$pref"
@@ -265,6 +307,98 @@ find_handoff() {
       FIND_ERR="$FIND_ERR; $skipped candidate(s) skipped: symlink, not owned by you, or unsafe name"
     fi
     return 1
+  fi
+}
+
+LIST_LIMIT=10
+
+# list_handoffs DIR REPO -> prints the handoffs find_handoff would consider,
+# newest first (equal mtimes in file-name order, like find_handoff's strict
+# -nt), marking the one it would pick. Sets FIND_ERR and returns 1 on a
+# search-dir error.
+list_handoffs() {
+  local repo="$2" cdir f name i j n shown_n=0 mark1 mark2 line
+  local by_name=0 unsafe=0 pick="" skip="" pick_shown=0
+  local sorted=()
+  check_search_dir "$1" || return 1
+  cdir="$CDIR"
+  if find_handoff "$cdir" "$repo"; then
+    pick="$FOUND"
+  fi
+
+  for f in "$cdir"/*.md; do
+    classify_candidate "$f"
+    case "$KIND" in
+      name) by_name=$((by_name + 1)) ;;
+      unsafe) unsafe=$((unsafe + 1)) ;;
+      ok)
+        # Insert before the first strictly older entry: equal mtimes keep the
+        # name order of the glob.
+        n=${#sorted[@]}
+        i=0
+        while [ "$i" -lt "$n" ] && ! [ "$f" -nt "${sorted[$i]}" ]; do
+          i=$((i + 1))
+        done
+        j=$n
+        while [ "$j" -gt "$i" ]; do
+          sorted[j]="${sorted[$((j - 1))]}"
+          j=$((j - 1))
+        done
+        sorted[i]="$f"
+        ;;
+    esac
+  done
+
+  line="$PROG: handoffs in $(shown "$cdir"), newest first (* = --latest would pick it"
+  if [ -n "$repo" ]; then
+    line="$line, + = named for $(shown "$repo")"
+  fi
+  printf '%s)\n' "$line"
+  n=${#sorted[@]}
+  if [ "$n" -eq 0 ]; then
+    printf '(no candidates)\n'
+  fi
+  for ((i = 0; i < n && i < LIST_LIMIT; i++)); do
+    f="${sorted[$i]}"
+    name="${f##*/}"
+    mark1=" "
+    mark2=" "
+    if [ "$f" = "$pick" ]; then
+      mark1="*"
+    fi
+    if name_has_repo "$name" "$repo"; then
+      mark2="+"
+    fi
+    printf '%s %s %s\n' "$mark1" "$mark2" "$(shown "$name")"
+    shown_n=$((shown_n + 1))
+    if [ "$f" = "$pick" ]; then
+      pick_shown=1
+    fi
+  done
+  # The --latest pick must always be visible, even when older than the newest 10.
+  if [ -n "$pick" ] && [ "$pick_shown" -eq 0 ]; then
+    name="${pick##*/}"
+    mark2=" "
+    if name_has_repo "$name" "$repo"; then
+      mark2="+"
+    fi
+    printf '* %s %s\n' "$mark2" "$(shown "$name")"
+    shown_n=$((shown_n + 1))
+  fi
+  if [ "$n" -gt "$shown_n" ]; then
+    printf '  ... and %d more\n' "$((n - shown_n))"
+  fi
+  if [ "$by_name" -gt 0 ]; then
+    skip="$by_name by name (superseded-*, _*, *-auto.md)"
+  fi
+  if [ "$unsafe" -gt 0 ]; then
+    if [ -n "$skip" ]; then
+      skip="$skip; "
+    fi
+    skip="$skip$unsafe unsafe (symlink, not owned by you, or unsafe name)"
+  fi
+  if [ -n "$skip" ]; then
+    printf 'skipped: %s\n' "$skip"
   fi
 }
 
@@ -298,7 +432,7 @@ print_fallback() { # print_fallback CMD
 main() {
   local agent="${TIN_CAN_AGENT:-claude}"
   local term="${TIN_CAN_TERM:-auto}"
-  local where="tab" where_given=0 cwd="" dry_run=0 latest=0
+  local where="tab" where_given=0 cwd="" dry_run=0 latest=0 list=0
   local search_dir="${TIN_CAN_DIR:-${HOME:-}/.claude/resume-prompts}"
   local handoff_arg="" have_handoff=0
   local agent_bin repo handoff hd hbase prompt cmd session="" rc err a opt
@@ -338,6 +472,10 @@ main() {
         ;;
       --latest)
         latest=1
+        shift
+        ;;
+      --list)
+        list=1
         shift
         ;;
       --)
@@ -396,6 +534,14 @@ main() {
     die 2 "handoff search dir contains a control character; refusing: $(shown "$search_dir")"
   fi
 
+  if [ "$list" -eq 1 ]; then
+    if [ "$have_handoff" -eq 1 ] || [ "$latest" -eq 1 ]; then
+      die 2 "--list cannot be combined with HANDOFF_FILE or --latest"
+    fi
+    list_handoffs "$search_dir" "$repo" || die 2 "$FIND_ERR"
+    exit 0
+  fi
+
   if [ "$latest" -eq 1 ] && [ "$have_handoff" -eq 1 ]; then
     die 2 "--latest and HANDOFF_FILE are mutually exclusive: pass one or the other"
   fi
@@ -440,6 +586,17 @@ main() {
     printf '%s: using %s\n' "$PROG" "$(shown "$handoff")" >&2
   fi
 
+  if [ -n "$repo" ]; then
+    case "$handoff" in
+      "${cwd%/}/"*) ;;
+      *)
+        if ! name_has_repo "${handoff##*/}" "$repo"; then
+          warn "$(shown "$handoff") does not look like it belongs to $(shown "$cwd"); the new session will start there (use --cwd to choose the directory)"
+        fi
+        ;;
+    esac
+  fi
+
   prompt="Read the handoff file at $handoff and follow its KICKOFF section."
   cmd="cd $(sq "$cwd") && exec $(sq "$agent_bin") $(sq "$prompt")"
 
@@ -459,6 +616,34 @@ main() {
       else
         session="tin-can-$$"
         set -- tmux new-session -d -s "$session" "$cmd"
+      fi
+      ;;
+    zellij)
+      # Zellij has no windows: a window is a new detached session. $cmd is
+      # one argv element; sh is the only thing that re-parses it.
+      if [ "$where" = "tab" ]; then
+        set -- zellij action new-tab --name "$repo (tin-can)" -- sh -c "$cmd"
+      else
+        # Exited sessions can be resurrected and an existing name ignores the
+        # command, so a recycled PID alone could collide; add $RANDOM.
+        session="tin-can-$$-$RANDOM"
+        set -- zellij attach --create-background "$session" -- sh -c "$cmd"
+      fi
+      ;;
+    wezterm)
+      # $cmd is one argv element; sh is the only thing that re-parses it.
+      if [ "$where" = "tab" ]; then
+        set -- wezterm cli spawn -- sh -c "$cmd"
+      else
+        set -- wezterm cli spawn --new-window -- sh -c "$cmd"
+      fi
+      ;;
+    kitty)
+      # Needs allow_remote_control in kitty.conf; the new tab takes focus.
+      if [ "$where" = "tab" ]; then
+        set -- kitten @ launch --type=tab sh -c "$cmd"
+      else
+        set -- kitten @ launch --type=os-window sh -c "$cmd"
       fi
       ;;
     print)
@@ -510,6 +695,8 @@ main() {
   fi
   if [ "$term" = "tmux" ] && [ "$where" = "window" ]; then
     printf '%s: launched %s in a new DETACHED tmux session; attach with: tmux attach -t %s\n' "$PROG" "$agent" "$session" >&2
+  elif [ "$term" = "zellij" ] && [ "$where" = "window" ]; then
+    printf '%s: launched %s in a new DETACHED zellij session; attach with: zellij attach %s\n' "$PROG" "$agent" "$session" >&2
   elif [ "$term" = "tmux" ]; then
     printf '%s: launched %s in a new tmux window (tab)\n' "$PROG" "$agent" >&2
   else

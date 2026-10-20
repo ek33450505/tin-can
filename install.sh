@@ -4,7 +4,10 @@
 #   bin/tin-can     -> ${TIN_CAN_BIN_DIR:-$HOME/.local/bin}/tin-can
 #   skills/tin-can  -> ${CLAUDE_SKILLS_DIR:-$HOME/.claude/skills}/tin-can
 #
-# Usage: ./install.sh [--force] [--uninstall]
+# Usage: ./install.sh [--force] [--no-skill] [--uninstall]
+#
+# --no-skill skips the skill link on install (use it when the Claude Code
+# plugin provides the skill). Uninstall is unchanged.
 #
 # Idempotent. A link that already points at this checkout is left alone.
 # An existing regular file or directory at the destination is never
@@ -22,12 +25,14 @@ SKILLS_DIR="${CLAUDE_SKILLS_DIR:-${HOME:-}/.claude/skills}"
 
 mode="install"
 force=0
+no_skill=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --uninstall) mode="uninstall" ;;
     --force) force=1 ;;
+    --no-skill) no_skill=1 ;;
     -h | --help)
-      sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -115,7 +120,11 @@ unlink_one() { # unlink_one SRC DEST
 
 if [ "$mode" = "install" ]; then
   link_one "$ROOT/bin/tin-can" "$BIN_DIR/tin-can" || fail=1
-  link_one "$ROOT/skills/tin-can" "$SKILLS_DIR/tin-can" || fail=1
+  if [ "$no_skill" -eq 1 ]; then
+    printf 'skip:    skill (--no-skill; the Claude Code plugin provides it)\n'
+  else
+    link_one "$ROOT/skills/tin-can" "$SKILLS_DIR/tin-can" || fail=1
+  fi
   case ":${PATH:-}:" in
     *":$BIN_DIR:"*) ;;
     *) printf 'note:    %s is not on PATH\n' "$BIN_DIR" ;;
