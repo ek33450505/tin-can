@@ -18,7 +18,7 @@ PROG="tin-can"
 # Single source for validation and --help. To add an agent: add its name here
 # (and a case branch in agent_binary only if its binary name differs).
 SUPPORTED_AGENTS="claude codex"
-SUPPORTED_TERMS="cmux tmux wezterm kitty print auto"
+SUPPORTED_TERMS="cmux tmux zellij wezterm kitty print auto"
 
 die() {
   local code="$1"
@@ -88,11 +88,11 @@ there steers the next session: review the chosen file (use --dry-run) before
 launching. Files with equal modification times are taken in file-name order.
 
 --term auto picks cmux if \$CMUX_WORKSPACE_ID is set and cmux is on PATH, else
-tmux if \$TMUX is set and tmux is on PATH, else wezterm if \$WEZTERM_PANE is
-set and wezterm is on PATH, else kitty if \$KITTY_WINDOW_ID is set and kitten
-is on PATH, else print (the launch command is printed so you can paste it into
-a new tab). kitty needs remote control enabled (see README; socket-only is
-safer than yes).
+tmux if \$TMUX is set and tmux is on PATH, else zellij if \$ZELLIJ is set and
+zellij is on PATH, else wezterm if \$WEZTERM_PANE is set and wezterm is on
+PATH, else kitty if \$KITTY_WINDOW_ID is set and kitten is on PATH, else print
+(the launch command is printed so you can paste it into a new tab). kitty needs
+remote control enabled (see README; socket-only is safer than yes).
 
 Paths containing ASCII control characters (tab, newline, ESC, DEL), C1 controls
 (U+0080-U+009F), line/paragraph separators (U+2028-U+2029), bidi embeddings and
@@ -142,6 +142,8 @@ detect_term() {
     printf 'cmux'
   elif [ -n "${TMUX:-}" ] && command -v tmux >/dev/null 2>&1; then
     printf 'tmux'
+  elif [ -n "${ZELLIJ:-}" ] && command -v zellij >/dev/null 2>&1; then
+    printf 'zellij'
   elif [ -n "${WEZTERM_PANE:-}" ] && command -v wezterm >/dev/null 2>&1; then
     printf 'wezterm'
   elif [ -n "${KITTY_WINDOW_ID:-}" ] && command -v kitten >/dev/null 2>&1; then
@@ -616,6 +618,18 @@ main() {
         set -- tmux new-session -d -s "$session" "$cmd"
       fi
       ;;
+    zellij)
+      # Zellij has no windows: a window is a new detached session. $cmd is
+      # one argv element; sh is the only thing that re-parses it.
+      if [ "$where" = "tab" ]; then
+        set -- zellij action new-tab --name "$repo (tin-can)" -- sh -c "$cmd"
+      else
+        # Exited sessions can be resurrected and an existing name ignores the
+        # command, so a recycled PID alone could collide; add $RANDOM.
+        session="tin-can-$$-$RANDOM"
+        set -- zellij attach --create-background "$session" -- sh -c "$cmd"
+      fi
+      ;;
     wezterm)
       # $cmd is one argv element; sh is the only thing that re-parses it.
       if [ "$where" = "tab" ]; then
@@ -681,6 +695,8 @@ main() {
   fi
   if [ "$term" = "tmux" ] && [ "$where" = "window" ]; then
     printf '%s: launched %s in a new DETACHED tmux session; attach with: tmux attach -t %s\n' "$PROG" "$agent" "$session" >&2
+  elif [ "$term" = "zellij" ] && [ "$where" = "window" ]; then
+    printf '%s: launched %s in a new DETACHED zellij session; attach with: zellij attach %s\n' "$PROG" "$agent" "$session" >&2
   elif [ "$term" = "tmux" ]; then
     printf '%s: launched %s in a new tmux window (tab)\n' "$PROG" "$agent" >&2
   else

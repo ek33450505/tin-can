@@ -232,7 +232,7 @@ load helpers
   [[ "$output" == *"Usage: tin-can"* ]]
   [[ "$output" == *"claude | codex"* ]]
   [[ "$output" == *"--latest"* ]]
-  [[ "$output" == *"cmux | tmux | wezterm | kitty | print | auto"* ]]
+  [[ "$output" == *"cmux | tmux | zellij | wezterm | kitty | print | auto"* ]]
 }
 
 @test "latest: no file and no --latest exits 2, names --latest, launches nothing" {
@@ -1601,5 +1601,110 @@ raw_path_sites() {
     load_call claude
     [ "$CALL_PWD" = "$cdir" ]
     [ "${#ARGS[@]}" -eq 1 ]
+  done
+}
+
+# --- zellij --------------------------------------------------------------------
+
+@test "auto: ZELLIJ=0 + zellij on PATH selects zellij (0 counts as set)" {
+  export ZELLIJ=0
+  run_tc --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(call_count zellij)" -eq 1 ]
+  [ "$(total_calls)" -eq 1 ]
+}
+
+@test "auto: tmux wins over ZELLIJ" {
+  export TMUX=/tmp/tmux-1/default,1,0 ZELLIJ=0
+  run_tc --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(call_count tmux)" -eq 1 ]
+  [ "$(call_count zellij)" -eq 0 ]
+}
+
+@test "auto: zellij wins over WEZTERM_PANE" {
+  export ZELLIJ=0 WEZTERM_PANE=3
+  run_tc --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(call_count zellij)" -eq 1 ]
+  [ "$(call_count wezterm)" -eq 0 ]
+}
+
+@test "auto: ZELLIJ set but zellij not on PATH falls through" {
+  export ZELLIJ=0 WEZTERM_PANE=3
+  rm "$STUBS/zellij"
+  run_tc --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(call_count wezterm)" -eq 1 ]
+  [ "$(total_calls)" -eq 1 ]
+}
+
+@test "zellij tab: action new-tab --name 'REPO (tin-can)' -- sh -c CMD" {
+  run_tc --term zellij --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  load_call zellij
+  [ "${#ARGS[@]}" -eq 8 ]
+  [ "${ARGS[0]}" = "action" ]
+  [ "${ARGS[1]}" = "new-tab" ]
+  [ "${ARGS[2]}" = "--name" ]
+  [ "${ARGS[3]}" = "myrepo (tin-can)" ]
+  [ "${ARGS[4]}" = "--" ]
+  [ "${ARGS[5]}" = "sh" ]
+  [ "${ARGS[6]}" = "-c" ]
+  [ "${ARGS[7]}" = "$(tc_cmd --cwd "$WORK" "$HF")" ]
+  [[ "$output" == *"launched claude in a new zellij tab"* ]]
+}
+
+@test "zellij window: attach --create-background NAME -- sh -c CMD, and attach hint" {
+  run_tc --term zellij --where window --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  load_call zellij
+  [ "${#ARGS[@]}" -eq 7 ]
+  [ "${ARGS[0]}" = "attach" ]
+  [ "${ARGS[1]}" = "--create-background" ]
+  [[ "${ARGS[2]}" =~ ^tin-can-[0-9]+-[0-9]+$ ]] || return 1
+  [ "${ARGS[3]}" = "--" ]
+  [ "${ARGS[4]}" = "sh" ]
+  [ "${ARGS[5]}" = "-c" ]
+  [ "${ARGS[6]}" = "$(tc_cmd --cwd "$WORK" "$HF")" ]
+  [[ "$output" == *"launched claude in a new DETACHED zellij session; attach with: zellij attach ${ARGS[2]}"* ]]
+}
+
+@test "failure: zellij non-zero exits 1 with fallback" {
+  export STUB_EXIT_ZELLIJ=1
+  run_tc --term zellij --cwd "$WORK" "$HF"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"zellij failed (exit 1)"* ]] || return 1
+  [[ "$output" == *"paste this into a new terminal tab"* ]] || return 1
+  [[ "$output" == *"exec 'claude' "* ]]
+}
+
+@test "dry-run: zellij launches nothing and shows zellij action new-tab" {
+  run_tc --dry-run --term zellij --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [ "$(total_calls)" -eq 0 ]
+  [[ "$output" == *"zellij action new-tab"* ]]
+}
+
+@test "roundtrip: zellij sh -c CMD survives a hostile directory name" {
+  local d="$TEST_ROOT/rt/it's \$(id) dir" cdir
+  mkdir -p "$d"
+  printf '# h\n\n## KICKOFF\nGo.\n' >"$d/h.md"
+  cdir="$(cd -P "$d" && pwd -P)"
+  run_tc --term zellij --cwd "$d" "$d/h.md"
+  [ "$status" -eq 0 ]
+  load_call zellij
+  env "PATH=$TC_PATH" /bin/sh -c "${ARGS[$((${#ARGS[@]} - 1))]}"
+  load_call claude
+  [ "$CALL_PWD" = "$cdir" ]
+  [ "${#ARGS[@]}" -eq 1 ]
+}
+
+@test "help: every line is at most 80 columns" {
+  local l
+  run_tc --help
+  [ "$status" -eq 0 ]
+  for l in "${lines[@]}"; do
+    [ "${#l}" -le 80 ] || return 1
   done
 }
