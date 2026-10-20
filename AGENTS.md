@@ -9,6 +9,7 @@ tin-can hands a coding session to a fresh terminal tab. The old session's agent 
 - Run both bats modes before saying tests pass. Read the TAP counts (`1..N`, any `not ok`), not the exit status alone.
 - Mutation-check every new test: break the code, confirm the test fails, restore.
 - Bump `VERSION` and `.claude-plugin/plugin.json` together, and update the README's pinned `#vX.Y.Z` plugin tag on release.
+- After a release is published, bump `url` and `sha256` in the Homebrew tap's `Formula/tin-can.rb` (ek33450505/homebrew-tin-can). Do not commit or push to the tap without the maintainer's OK.
 - Do not put instructions for your own project's AGENTS.md here. That snippet is `docs/agents-snippet.md`.
 
 ## Layout
