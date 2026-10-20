@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+# tin-can-hook: Claude Code hook that helps launch tin-can handoffs.
+#
+# Usage: tin-can-hook <event>   (hook JSON arrives on stdin)
+#
+# Events:
+#   post-write  PostToolUse on Write|Edit|MultiEdit. When the session wrote a
+#               handoff file directly into the handoff directory, tell the user
+#               (systemMessage) and the model (additionalContext) the exact
+#               `! tin-can '<path>'` command that launches it.
+#   Any other event exits 0 silently (prompt and stop are added later).
+#
+# Environment:
+#   TIN_CAN_HOOKS=0      disable the hook entirely
+#   TIN_CAN_DIR          handoff directory (default ~/.claude/resume-prompts)
+#   CLAUDE_PLUGIN_DATA   state root (default $TMPDIR or /tmp); state lives in
+#                        <root>/tin-can-hook/<session_id>/handoff
+#
+# A hook must never break the session, so this script fails open: any problem
+# (no jq, bad JSON, unexpected values, state errors) exits 0 with no output.
+# It deliberately does not use `set -e` for that reason.
+set -u
+
+# Directory holding this script, with symlinks resolved (BSD has no readlink -f).
+self_dir() {
+  local src="${BASH_SOURCE[0]}" dir link
+  while [ -L "$src" ]; do
+    dir="$(cd -P "$(dirname "$src")" && pwd -P)"
+    link="$(readlink "$src")"
+    case "$link" in
+      /*) src="$link" ;;
+      *) src="$dir/$link" ;;
+    esac
+  done
+  cd -P "$(dirname "$src")" && pwd -P
+}
+
+# sq STRING -> POSIX single-quoted form, valid in sh/dash/bash/zsh.
+sq() {
+  local s="$1" q="'" bs="\\" out
+  out=${s//$q/$q$bs$q$q}
+  printf "'%s'" "$out"
+}
+
+# canon_dir DIR -> sets CANON to the physical absolute path. Uses a sentinel so
+# a trailing newline in the path is not silently stripped.
+canon_dir() {
+  local out
+  out="$(cd -P -- "$1" 2>/dev/null && pwd -P && printf x)" || return 1
+  out="${out%x}"
+  CANON="${out%$'\n'}"
+}
+
+# jq_field FILTER -> sets FIELD to the raw string value, newlines preserved.
+jq_field() {
+  local out
+  out="$(printf '%s' "$INPUT" | jq -r "$1" 2>/dev/null && printf x)" || return 1
+  out="${out%x}"
+  FIELD="${out%$'\n'}"
+}
+
+# Record the handoff path for the stop event. Best effort: never fails the hook.
+record_state() {
+  local sid="$1" file="$2" root base sdir tmp
+  case "$sid" in
+    "" | *[!A-Za-z0-9_-]*) return 0 ;;
+  esac
+  [ "${#sid}" -le 64 ] || return 0
+  root="${CLAUDE_PLUGIN_DATA:-${TMPDIR:-/tmp}}"
+  base="$root/tin-can-hook"
+  sdir="$base/$sid"
+  umask 077
+  mkdir -p "$base" 2>/dev/null || return 0
+  [ -d "$base" ] && [ ! -L "$base" ] && [ -O "$base" ] || return 0
+  mkdir -p "$sdir" 2>/dev/null || return 0
+  [ -d "$sdir" ] && [ ! -L "$sdir" ] && [ -O "$sdir" ] || return 0
+  tmp="$(mktemp "$sdir/.handoff.XXXXXX" 2>/dev/null)" || return 0
+  if printf '%s\n' "$file" >"$tmp" 2>/dev/null; then
+    mv -f "$tmp" "$sdir/handoff" 2>/dev/null || rm -f "$tmp"
+  else
+    rm -f "$tmp"
+  fi
+  return 0
+}
+
+post_write() {
+  local tool file base parent hd hdir tc cmd sid msg ctx canon
+  jq_field '.tool_name // empty | strings' || return 0
+  tool="$FIELD"
+  case "$tool" in
+    Write | Edit | MultiEdit) ;;
+    *) return 0 ;;
+  esac
+  jq_field '.tool_input.file_path? // empty | strings' || return 0
+  file="$FIELD"
+  [ -n "$file" ] || return 0
+  case "$file" in
+    /*) ;;
+    *) return 0 ;;
+  esac
+
+  base="${file##*/}"
+  parent="${file%/*}"
+  [ -n "$parent" ] || parent=/
+  case "$base" in
+    _* | superseded-* | *-auto.md) return 0 ;;
+    *.md) ;;
+    *) return 0 ;;
+  esac
+
+  hdir="${TIN_CAN_DIR:-}"
+  if [ -z "$hdir" ]; then
+    [ -n "${HOME:-}" ] || return 0
+    hdir="$HOME/.claude/resume-prompts"
+  fi
+  canon_dir "$hdir" || return 0
+  hd="$CANON"
+  canon_dir "$parent" || return 0
+  [ "$CANON" = "$hd" ] || return 0
+  [ -L "$file" ] && return 0
+  canon="$hd/$base"
+
+  tc="$(self_dir)/../bin/tin-can"
+  [ -x "$tc" ] || return 0
+  "$tc" --cwd "$hd" --dry-run --term print -- "$canon" >/dev/null 2>&1 || return 0
+
+  cmd="tin-can $(sq "$canon")"
+  msg="tin-can: handoff written. Launch it with:  ! $cmd"
+  ctx="A tin-can handoff was written to $canon. End your reply with this line on its own, so the user can launch it: ! $cmd"
+  jq -n --arg msg "$msg" --arg ctx "$ctx" \
+    '{systemMessage: $msg, hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: $ctx}}' 2>/dev/null || return 0
+
+  jq_field '.session_id // empty | strings' || return 0
+  sid="$FIELD"
+  record_state "$sid" "$canon" >/dev/null 2>&1
+  return 0
+}
+
+main() {
+  [ "${TIN_CAN_HOOKS:-1}" = 0 ] && return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  INPUT="$(cat 2>/dev/null || true)"
+  case "${1:-}" in
+    post-write) post_write ;;
+    *) ;;
+  esac
+  return 0
+}
+
+main "$@"
+exit 0

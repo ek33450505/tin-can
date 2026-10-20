@@ -22,7 +22,7 @@ jobs:
         with:
           persist-credentials: false
       - name: ShellCheck
-        run: shellcheck --shell=bash bin/tin-can install.sh
+        run: shellcheck --shell=bash bin/tin-can install.sh hooks/tin-can-hook
 
   bats-ubuntu:
     runs-on: ubuntu-latest
@@ -31,10 +31,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Install bats and zsh
+      - name: Install bats, zsh and jq
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends bats zsh
+          sudo apt-get install -y --no-install-recommends bats zsh jq
           command -v zsh >/dev/null || { echo "zsh missing: roundtrip test would skip" >&2; exit 1; }
           bats --version
       - name: Run tests
