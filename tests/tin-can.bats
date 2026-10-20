@@ -1196,3 +1196,62 @@ raw_path_sites() {
   [ "$status" -eq 0 ]
   [ "$output" = "1" ]
 }
+
+# A failed launcher's stderr is untrusted: non-printable bytes become '?'.
+@test "failure: launcher stderr with ESC, C1 and RLO is sanitized (UTF-8 locale)" {
+  printf '%s\n' '#!/bin/sh' \
+    "printf 'plain-text \\033[31m \\302\\233 \\342\\200\\256 end\\n' >&2" \
+    "printf 'tin-can: launched claude in a new cmux tab\\n' >&2" \
+    'exit 3' >"$STUBS/cmux"
+  run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term cmux --cwd "$WORK" "$HF"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"cmux failed (exit 3)"* ]] || return 1
+  [[ "$output" == *"plain-text"* ]] || return 1
+  [[ "$output" == *"  tin-can: launched claude in a new cmux tab"* ]] || return 1
+  local l
+  for l in "${lines[@]}"; do
+    [[ "$l" != "tin-can: launched"* ]] || return 1
+  done
+  [[ "$output" == *"?[31m"* ]] || return 1
+  [[ "$output" != *$'\033'* ]] || return 1
+  [[ "$output" != *$'\xc2\x9b'* ]] || return 1
+  [[ "$output" != *$'\xe2\x80\xae'* ]] || return 1
+  [[ "$output" == *"paste this into a new terminal tab"* ]] || return 1
+  [[ "$output" == *"exec 'claude' "* ]] || return 1
+}
+
+@test "dry-run: non-ASCII cwd is escaped, command stays raw, note on stderr (UTF-8 locale)" {
+  local z; z="$(printf '\342\200\213')"
+  mkdir -p "$TEST_ROOT/work/a${z}b"
+  run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "CMUX_WORKSPACE_ID=ws-1" "$TC_BASH" "$TC" --term cmux --where window --dry-run --cwd "$TEST_ROOT/work/a${z}b" "$HF"
+  [ "$status" -eq 0 ]
+  local cwdline launchline cmdline
+  cwdline="$(printf '%s\n' "$output" | grep '^  cwd:')"
+  launchline="$(printf '%s\n' "$output" | grep '^  launch:')"
+  cmdline="$(printf '%s\n' "$output" | grep '^  command:')"
+  [[ "$cwdline" == *'\342\200\213'* ]] || return 1
+  [[ "$cwdline" != *"$z"* ]] || return 1
+  [[ "$launchline" == *"--cwd"* ]] || return 1
+  [[ "$launchline" != *"$z"* ]] || return 1
+  [[ "$cmdline" == *"$z"* ]] || return 1
+  [[ "$output" == *"note: the command contains non-ASCII characters"* ]] || return 1
+}
+
+@test "print: non-ASCII cwd notes on stderr, stdout is exactly the command" {
+  local z out err; z="$(printf '\342\200\213')"
+  mkdir -p "$TEST_ROOT/work/a${z}b"
+  out="$(env "PATH=$TC_PATH" "$TC_BASH" "$TC" --term print --cwd "$TEST_ROOT/work/a${z}b" "$HF" 2>"$TEST_ROOT/err")"
+  err="$(cat "$TEST_ROOT/err")"
+  [[ "$err" == *"note: the command contains non-ASCII characters"* ]] || return 1
+  [[ "$out" == "cd "* || "$out" == *"exec 'claude' "* ]] || return 1
+  [[ "$out" != *"note:"* ]] || return 1
+  [ "$out" = "$(tc_cmd --cwd "$TEST_ROOT/work/a${z}b" "$HF")" ]
+}
+
+@test "dry-run: ASCII-only paths print no non-ASCII note" {
+  run_tc --term print --dry-run --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"non-ASCII"* ]] || return 1
+  run_tc --term print --cwd "$WORK" "$HF"
+  [[ "$output" != *"non-ASCII"* ]] || return 1
+}

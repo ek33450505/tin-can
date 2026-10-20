@@ -268,8 +268,30 @@ find_handoff() {
   fi
 }
 
+# safe_text STRING -> STRING with every byte that is not printable ASCII,
+# newline or tab replaced by '?'. For untrusted multi-line output (a failed
+# launcher's stderr); pure bash, byte-wise under LC_ALL=C.
+safe_text() {
+  local LC_ALL=C
+  local s="$1"
+  s=${s//[^[:print:]$'\n'$'\t']/?}
+  printf '%s' "$s"
+}
+
+# has_nonascii STRING -> true if any byte is in 0x80-0xFF.
+has_nonascii() {
+  local LC_ALL=C
+  case "$1" in
+    *[!$'\x01'-$'\x7f']*) return 0 ;;
+  esac
+  return 1
+}
+
 print_fallback() { # print_fallback CMD
   printf '%s: paste this into a new terminal tab to start the fresh session:\n' "$PROG" >&2
+  if has_nonascii "$1"; then
+    printf '%s: note: the command contains non-ASCII characters; check it before pasting\n' "$PROG" >&2
+  fi
   printf '%s\n' "$1"
 }
 
@@ -448,8 +470,8 @@ main() {
     printf 'tin-can dry-run (nothing launched)\n'
     printf '  agent:   %s\n' "$agent"
     printf '  term:    %s (%s)\n' "$term" "$where"
-    printf '  cwd:     %s\n' "$cwd"
-    printf '  handoff: %s\n' "$handoff"
+    printf '  cwd:     %s\n' "$(shown "$cwd")"
+    printf '  handoff: %s\n' "$(shown "$handoff")"
     if [ "$term" = "print" ]; then
       printf '  launch:  (print only)\n'
     else
@@ -458,12 +480,15 @@ main() {
         if [ "$a" = "$cmd" ]; then
           printf ' <command>'
         else
-          printf ' %q' "$a"
+          printf ' %s' "$(shown "$a")"
         fi
       done
       printf '\n'
     fi
     printf '  command: %s\n' "$cmd"
+    if has_nonascii "$cmd"; then
+      printf '%s: note: the command contains non-ASCII characters; check the paths above before pasting it\n' "$PROG" >&2
+    fi
     exit 0
   fi
 
@@ -477,7 +502,8 @@ main() {
   if [ "$rc" -ne 0 ]; then
     printf '%s: %s failed (exit %s)\n' "$PROG" "$term" "$rc" >&2
     if [ -n "$err" ]; then
-      printf '%s\n' "$err" >&2
+      err="$(safe_text "$err")"
+      printf '  %s\n' "${err//$'\n'/$'\n'  }" >&2
     fi
     print_fallback "$cmd"
     exit 1
