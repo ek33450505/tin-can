@@ -10,7 +10,7 @@ It is a small bash script. It works with more than one agent and more than one t
 
 ## Quick start
 
-1. Clone the repository and run the installer:
+1. Install with Homebrew, `brew install ek33450505/tin-can/tin-can`, or clone the repository and run the installer:
 
    ```bash
    git clone https://github.com/ek33450505/tin-can
@@ -61,6 +61,14 @@ Long sessions fill their context. The usual fix is to summarise the work, open a
 
 ## Install
 
+With Homebrew:
+
+```bash
+brew install ek33450505/tin-can/tin-can
+```
+
+This installs the `tin-can` command. For the Claude Code skill and hooks, add the [plugin](#claude-code-plugin-optional); `brew info tin-can` shows how to link the skill without it. The tap is [ek33450505/homebrew-tin-can](https://github.com/ek33450505/homebrew-tin-can).
+
 From a clone of this repository (symlinks only, no copying, no sudo):
 
 ```bash
@@ -84,7 +92,7 @@ The plugin adds the skill plus three hooks that make handoffs harder to forget:
 
 Installing the plugin means Claude Code runs `hooks/tin-can-hook` automatically, as you, on every prompt, every Write/Edit/MultiEdit and every turn end. Read the script before you install it. The hooks only print a command or advise the model; they never launch anything.
 
-Install the binary first with `./install.sh --no-skill` (see Install above; the `! tin-can` line the hooks print needs `tin-can` on your shell's `PATH`). Then add the plugin, pinned to a release tag (recommended):
+Install the binary first, with Homebrew or with `./install.sh --no-skill` (see Install above; the `! tin-can` line the hooks print needs `tin-can` on your shell's `PATH`). Then add the plugin, pinned to a release tag (recommended):
 
 ```
 /plugin marketplace add ek33450505/tin-can#v0.2.1
