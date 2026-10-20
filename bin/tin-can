@@ -91,9 +91,10 @@ printed so you can paste it into a new tab).
 
 Paths containing ASCII control characters (tab, newline, ESC, DEL), C1 controls
 (U+0080-U+009F), line/paragraph separators (U+2028-U+2029), bidi embeddings and
-overrides (U+202A-U+202E), bidi isolates (U+2066-U+2069) or bidi marks (U+200E,
-U+200F, U+061C) are refused (exit 2) for --cwd, --dir and an explicit
-HANDOFF_FILE; --latest skips such files.
+overrides (U+202A-U+202E), bidi isolates (U+2066-U+2069), bidi marks (U+200E,
+U+200F, U+061C), Unicode tag characters (U+E0000-U+E007F) or lookalike spaces
+(U+00A0, U+2000-U+200A, U+202F, U+205F, U+3000) are refused (exit 2) for --cwd,
+--dir and an explicit HANDOFF_FILE; --latest skips such files.
 
 Exit codes: 0 ok, 1 launch failure, 2 usage or handoff error.
 EOF
@@ -144,22 +145,29 @@ detect_term() {
 # has_ctrl STRING: true if it contains a character that could disguise or
 # inject terminal/shell text. Matched byte-wise under LC_ALL=C:
 #   ASCII controls 0x01-0x1F and 0x7F;
-#   C1 controls U+0080-U+009F (UTF-8 C2 80..C2 9F);
-#   line/paragraph separators and bidi embeddings/overrides U+2028-U+202E
-#     (E2 80 A8..AE);
+#   C1 controls U+0080-U+009F and no-break space U+00A0 (UTF-8 C2 80..C2 A0);
+#   line/paragraph separators, bidi embeddings/overrides and narrow no-break
+#     space U+2028-U+202F (E2 80 A8..AF);
 #   bidi isolates U+2066-U+2069 (E2 81 A6..A9);
 #   bidi marks LRM/RLM U+200E-U+200F (E2 80 8E..8F);
-#   Arabic letter mark U+061C (D8 9C).
-# Plain non-ASCII text (accents, CJK, emoji) is not matched.
+#   Arabic letter mark U+061C (D8 9C);
+#   lookalike spaces U+2000-U+200A (E2 80 80..8A), U+205F (E2 81 9F) and
+#     U+3000 (E3 80 80);
+#   Unicode tag characters U+E0000-U+E007F (F3 A0 80 80..F3 A0 81 BF).
+# Letters, CJK ideographs, emoji, ZWSP and ZWJ are not matched.
 has_ctrl() {
   local LC_ALL=C
   case "$1" in
     *[[:cntrl:]]*) return 0 ;;
-    *$'\xc2'[$'\x80'-$'\x9f']*) return 0 ;;
-    *$'\xe2\x80'[$'\xa8'-$'\xae']*) return 0 ;;
+    *$'\xc2'[$'\x80'-$'\xa0']*) return 0 ;;
+    *$'\xe2\x80'[$'\xa8'-$'\xaf']*) return 0 ;;
     *$'\xe2\x81'[$'\xa6'-$'\xa9']*) return 0 ;;
     *$'\xe2\x80'[$'\x8e'-$'\x8f']*) return 0 ;;
     *$'\xd8\x9c'*) return 0 ;;
+    *$'\xe2\x80'[$'\x80'-$'\x8a']*) return 0 ;;
+    *$'\xe2\x81\x9f'*) return 0 ;;
+    *$'\xe3\x80\x80'*) return 0 ;;
+    *$'\xf3\xa0'[$'\x80'-$'\x81']*) return 0 ;;
   esac
   return 1
 }

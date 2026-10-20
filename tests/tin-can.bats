@@ -657,6 +657,26 @@ load helpers
   [[ "$output" == *"tin-can: using $RESUME/older.md"* ]]
 }
 
+@test "trust: a candidate whose name has a no-break space is skipped even when newest" {
+  printf 'old\n' >"$RESUME/older.md"
+  printf 'x\n' >"$RESUME/$(printf 'new\302\240x').md"
+  set_mtime "$RESUME/older.md" 202601010000
+  set_mtime "$RESUME/$(printf 'new\302\240x').md" 202601050000
+  run_tc --latest --cwd "$TEST_ROOT" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"tin-can: using $RESUME/older.md"* ]]
+}
+
+@test "lookalike spaces and tag characters are refused as 'control' errors" {
+  local n
+  for n in "$(printf 'x\342\200\201y')" "$(printf 'x\343\200\200y')" \
+    "$(printf 'x\363\240\201\224y')"; do
+    run_tc --term print --cwd "$TEST_ROOT/no-such/$n" "$HF"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"control character"* ]]
+  done
+}
+
 @test "trust: an explicit symlink handoff is allowed but warns" {
   ln -s "$HF" "$TEST_ROOT/link.md"
   run_tc --cwd "$WORK" --term print "$TEST_ROOT/link.md"
@@ -993,10 +1013,11 @@ find_dash() {
 }
 
 @test "unicode controls: ordinary non-ASCII near the refused ranges is accepted" {
-  # U+00A0 (C2 A0), U+00C1 (C3 81), U+202F (E2 80 AF), U+2064 (E2 81 A4),
-  # U+206A (E2 81 AA), emoji (F0 9F 98 80)
-  roundtrip "$(printf 'nb\302\240sp')" "$(printf 'c\303\201.md')"
-  roundtrip "$(printf 'nn\342\200\257sp')" "$(printf 'u\342\201\244.md')"
+  # U+00A1 (C2 A1), U+00C1 (C3 81), U+2030 (E2 80 B0), U+2064 (E2 81 A4),
+  # U+2060 (E2 81 A0), U+206A (E2 81 AA), emoji (F0 9F 98 80)
+  roundtrip "$(printf 'nb\302\241sp')" "$(printf 'c\303\201.md')"
+  roundtrip "$(printf 'nn\342\200\260sp')" "$(printf 'u\342\201\244.md')"
+  roundtrip "$(printf 'wj\342\201\240sp')" "$(printf 'z\342\200\215w.md')"
   roundtrip "$(printf 'e\342\201\252x')" "$(printf 'smile \360\237\230\200.md')"
 }
 
@@ -1006,8 +1027,10 @@ find_dash() {
   # Each input is paired with its octal rendering: the error must name THIS
   # input, escaped (UTF-8 locale, so bash 3.2's locale path is exercised).
   local oct raw
-  for oct in '\342\200\247' '\342\200\257' '\342\201\245' '\342\201\252' \
-    '\302\240' '\303\201' '\342\200\215' '\342\200\220' '\330\233' '\330\235'; do
+  for oct in '\342\200\247' '\342\201\245' '\342\201\252' \
+    '\302\241' '\303\201' '\342\200\215' '\342\200\220' '\330\233' '\330\235' \
+    '\341\277\277' '\342\200\213' '\342\200\260' '\342\201\236' '\342\201\240' \
+    '\342\277\277' '\343\200\201' '\363\237\277\277' '\363\240\202\200'; do
     # shellcheck disable=SC2059
     raw="$(printf "$oct")"
     run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print --cwd "$TEST_ROOT/no-such/a${raw}b" "$HF"
@@ -1025,7 +1048,10 @@ find_dash() {
   for n in "$(printf '\302\200')" "$(printf '\302\237')" \
     "$(printf '\342\200\250')" "$(printf '\342\200\256')" \
     "$(printf '\342\201\246')" "$(printf '\342\201\251')" \
-    "$(printf '\342\200\216')" "$(printf '\342\200\217')" "$(printf '\330\234')"; do
+    "$(printf '\342\200\216')" "$(printf '\342\200\217')" "$(printf '\330\234')" \
+    "$(printf '\302\240')" "$(printf '\342\200\200')" "$(printf '\342\200\212')" \
+    "$(printf '\342\200\257')" "$(printf '\342\201\237')" "$(printf '\343\200\200')" \
+    "$(printf '\363\240\200\200')" "$(printf '\363\240\201\277')"; do
     run_tc --term print --cwd "$TEST_ROOT/no-such/a${n}b" "$HF"
     [ "$status" -eq 2 ]
     [[ "$output" == *"control character"* ]]
