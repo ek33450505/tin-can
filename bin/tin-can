@@ -98,9 +98,10 @@ Paths containing ASCII control characters (tab, newline, ESC, DEL), C1 controls
 (U+0080-U+009F), line/paragraph separators (U+2028-U+2029), bidi embeddings and
 overrides (U+202A-U+202E), bidi isolates (U+2066-U+2069), bidi marks (U+200E,
 U+200F, U+061C), Unicode tag characters (U+E0000-U+E007F), invisible
-characters (U+00AD, U+200B, U+2060, U+FEFF) or lookalike spaces (U+00A0,
-U+2000-U+200A, U+202F, U+205F, U+3000) are refused (exit 2) for --cwd, --dir
-and an explicit HANDOFF_FILE; --latest skips such files.
+characters (U+00AD, U+115F, U+1160, U+180E, U+200B, U+2060, U+3164, U+FEFF,
+U+FFA0, U+E0100-U+E01FF) or lookalike spaces (U+00A0, U+2000-U+200A, U+202F,
+U+205F, U+3000) are refused (exit 2) for --cwd, --dir and an explicit
+HANDOFF_FILE; --latest skips such files.
 
 Exit codes: 0 ok, 1 launch failure, 2 usage or handoff error.
 EOF
@@ -168,9 +169,15 @@ detect_term() {
 #   invisible characters: soft hyphen U+00AD (C2 AD), zero-width space U+200B
 #     (E2 80 8B), word joiner U+2060 (E2 81 A0), zero-width no-break space
 #     U+FEFF (EF BB BF);
+#   blank-rendering fillers: Hangul choseong/jungseong filler U+115F-U+1160
+#     (E1 85 9F..A0), Mongolian vowel separator U+180E (E1 A0 8E), Hangul
+#     filler U+3164 (E3 85 A4), halfwidth Hangul filler U+FFA0 (EF BE A0);
+#   variation selectors supplement U+E0100-U+E01EF and the unassigned
+#     U+E01F0-U+E01FF after them (F3 A0 84 80..F3 A0 87 BF);
 #   Unicode tag characters U+E0000-U+E007F (F3 A0 80 80..F3 A0 81 BF).
-# Letters, CJK ideographs, emoji, ZWNJ (U+200C) and ZWJ (U+200D) are not
-# matched: emoji sequences and some scripts need them.
+# Letters, CJK ideographs, emoji, ZWNJ (U+200C), ZWJ (U+200D) and variation
+# selectors U+FE00-U+FE0F are not matched: emoji sequences and some scripts
+# need them.
 has_ctrl() {
   local LC_ALL=C
   case "$1" in
@@ -186,6 +193,11 @@ has_ctrl() {
     *$'\xef\xbb\xbf'*) return 0 ;;
     *$'\xe3\x80\x80'*) return 0 ;;
     *$'\xf3\xa0'[$'\x80'-$'\x81']*) return 0 ;;
+    *$'\xe1\x85'[$'\x9f'-$'\xa0']*) return 0 ;;
+    *$'\xe1\xa0\x8e'*) return 0 ;;
+    *$'\xe3\x85\xa4'*) return 0 ;;
+    *$'\xef\xbe\xa0'*) return 0 ;;
+    *$'\xf3\xa0'[$'\x84'-$'\x87']*) return 0 ;;
   esac
   return 1
 }
