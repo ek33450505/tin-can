@@ -71,7 +71,7 @@ Options:
   --dir DIR        handoff search directory for --latest
                    (default: \$TIN_CAN_DIR or ~/.claude/resume-prompts)
   --latest         auto-select the newest handoff in the search dir
-  --dry-run        show what would run; launch nothing
+  --dry-run        show what would run (paths escaped); launch nothing
   --version        print version
   -h, --help       print this help
 
@@ -189,9 +189,25 @@ canon_dir() {
   CANON="${out%$'\n'}"
 }
 
+# name_has_repo NAME REPO: true when NAME (minus .md) contains REPO as a whole
+# word; '-', '_' and '.' all count as separators.
+name_has_repo() {
+  local norm nrepo
+  nrepo="${2//_/-}"
+  nrepo="${nrepo//./-}"
+  [ -n "$nrepo" ] || return 1
+  norm="${1%.md}"
+  norm="${norm//_/-}"
+  norm="${norm//./-}"
+  case "-$norm-" in
+    *"-$nrepo-"*) return 0 ;;
+  esac
+  return 1
+}
+
 # find_handoff DIR REPO -> sets FOUND, or FIND_ERR and returns 1.
 find_handoff() {
-  local dir="$1" repo="$2" cdir wr f name norm nrepo
+  local dir="$1" repo="$2" cdir wr f name
   local best="" pref="" skipped=0
   FOUND=""
   FIND_ERR=""
@@ -218,8 +234,6 @@ find_handoff() {
     return 1
   fi
 
-  nrepo="${repo//_/-}"
-  nrepo="${nrepo//./-}"
   for f in "$cdir"/*.md; do
     if [ ! -e "$f" ] && [ ! -L "$f" ]; then
       continue # unmatched glob
@@ -242,17 +256,10 @@ find_handoff() {
     if [ -z "$best" ] || [ "$f" -nt "$best" ]; then
       best="$f"
     fi
-    if [ -n "$nrepo" ]; then
-      norm="${name%.md}"
-      norm="${norm//_/-}"
-      norm="${norm//./-}"
-      case "-$norm-" in
-        *"-$nrepo-"*)
-          if [ -z "$pref" ] || [ "$f" -nt "$pref" ]; then
-            pref="$f"
-          fi
-          ;;
-      esac
+    if name_has_repo "$name" "$repo"; then
+      if [ -z "$pref" ] || [ "$f" -nt "$pref" ]; then
+        pref="$f"
+      fi
     fi
   done
   if [ -n "$pref" ]; then
@@ -438,6 +445,17 @@ main() {
     find_handoff "$search_dir" "$repo" || die 2 "$FIND_ERR"
     handoff="$FOUND"
     printf '%s: using %s\n' "$PROG" "$(shown "$handoff")" >&2
+  fi
+
+  if [ -n "$repo" ]; then
+    case "$handoff" in
+      "${cwd%/}/"*) ;;
+      *)
+        if ! name_has_repo "${handoff##*/}" "$repo"; then
+          warn "$(shown "$handoff") does not look like it belongs to $(shown "$cwd"); the new session will start there (use --cwd to choose the directory)"
+        fi
+        ;;
+    esac
   fi
 
   prompt="Read the handoff file at $handoff and follow its KICKOFF section."

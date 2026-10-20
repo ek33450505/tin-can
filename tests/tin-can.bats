@@ -685,7 +685,8 @@ load helpers
 }
 
 @test "trust: an explicit regular file does not warn" {
-  run_tc --cwd "$WORK" --term print "$HF"
+  printf 'a\n' >"$RESUME/myrepo-trust.md"
+  run_tc --cwd "$WORK" --term print "$RESUME/myrepo-trust.md"
   [ "$status" -eq 0 ]
   [[ "$output" != *"WARNING"* ]]
 }
@@ -1254,4 +1255,68 @@ raw_path_sites() {
   [[ "$output" != *"non-ASCII"* ]] || return 1
   run_tc --term print --cwd "$WORK" "$HF"
   [[ "$output" != *"non-ASCII"* ]] || return 1
+}
+
+@test "wrong folder: explicit handoff not named for the cwd warns, still launches" {
+  printf 'a\n' >"$RESUME/2026-01-01-other-next.md"
+  run_tc "$RESUME/2026-01-01-other-next.md" --cwd "$WORK" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"does not look like it belongs to"* ]]
+}
+
+@test "wrong folder: handoff named for the cwd repo does not warn" {
+  printf 'a\n' >"$RESUME/2026-01-01-myrepo-next.md"
+  run_tc "$RESUME/2026-01-01-myrepo-next.md" --cwd "$WORK" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"does not look like it belongs to"* ]]
+}
+
+@test "wrong folder: handoff inside the cwd does not warn" {
+  mkdir -p "$WORK/docs"
+  printf 'a\n' >"$WORK/docs/NEXT-SESSION.md"
+  run_tc "$WORK/docs/NEXT-SESSION.md" --cwd "$WORK" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"does not look like it belongs to"* ]]
+}
+
+@test "wrong folder: repo name must be a whole word in the handoff name" {
+  printf 'a\n' >"$RESUME/myrepository-next.md"
+  printf 'b\n' >"$RESUME/x_myrepo.md"
+  run_tc "$RESUME/myrepository-next.md" --cwd "$WORK" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"does not look like it belongs to"* ]] || return 1
+  run_tc "$RESUME/x_myrepo.md" --cwd "$WORK" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"does not look like it belongs to"* ]]
+}
+
+@test "wrong folder: --latest falling back to an unrelated file warns" {
+  printf 'a\n' >"$RESUME/other-notes.md"
+  run_tc --latest --cwd "$WORK" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"tin-can: using $RESUME/other-notes.md"* ]] || return 1
+  [[ "$output" == *"does not look like it belongs to"* ]]
+}
+
+@test "wrong folder: --dry-run still warns and launches nothing" {
+  printf 'a\n' >"$RESUME/2026-01-01-other-next.md"
+  run_tc "$RESUME/2026-01-01-other-next.md" --cwd "$WORK" --term tmux --dry-run
+  [ "$status" -eq 0 ]
+  [ "$(total_calls)" -eq 0 ]
+  [[ "$output" == *"does not look like it belongs to"* ]]
+}
+
+@test "wrong folder: --cwd / has no repo name, so no warning" {
+  printf 'a\n' >"$RESUME/2026-01-01-other-next.md"
+  run_tc "$RESUME/2026-01-01-other-next.md" --cwd / --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"does not look like it belongs to"* ]]
+}
+
+@test "wrong folder: a sibling directory sharing the cwd prefix is not inside it" {
+  mkdir -p "$TEST_ROOT/work/myrepo2"
+  printf 'a\n' >"$TEST_ROOT/work/myrepo2/notes.md"
+  run_tc "$TEST_ROOT/work/myrepo2/notes.md" --cwd "$WORK" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"does not look like it belongs to"* ]]
 }
