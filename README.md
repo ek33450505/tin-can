@@ -2,7 +2,7 @@
 
 Hand an AI coding session off to a fresh session in a new terminal tab, without copy-paste.
 
-`tin-can` opens a new terminal tab (cmux and tmux: a tab, a new workspace, or a detached tmux session), starts your agent CLI there, and gives it a single prompt: read this handoff file and follow its KICKOFF section. The name is the tin-can telephone: a message passed down a string.
+`tin-can` opens a new terminal tab (in cmux, tmux, Zellij, WezTerm or kitty; or prints the command for any other terminal), starts your agent CLI there, and gives it a single prompt: read this handoff file and follow its KICKOFF section. The name is the tin-can telephone: a message passed down a string.
 
 It is a small bash script. It works with more than one agent and more than one terminal, and you trigger it yourself.
 
@@ -29,13 +29,13 @@ Because these are symlinks, the live `tin-can` binary and the auto-loaded `SKILL
 
 The plugin adds the skill plus three hooks that make handoffs harder to forget:
 
-- After a handoff is written to the handoff dir, it shows `! tin-can '<path>'`.
+- After a handoff is written to the handoff dir, it surfaces `! tin-can '<path>'`: as a message to you, and as a line the model is asked to end its reply with.
 - On a wrap-up phrase ("let's wrap up", "call it a day", "done for today"...), it asks the model to write a handoff if work is unfinished.
 - At the end of such a turn, if git shows uncommitted or unpushed work and no handoff was written, it asks once per session.
 
 Installing the plugin means Claude Code runs `hooks/tin-can-hook` automatically, as you, on every prompt, every Write/Edit/MultiEdit and every turn end. Read the script before you install it. The hooks only print a command or advise the model; they never launch anything.
 
-Install, pinned to a release tag (recommended):
+Install the binary first with `./install.sh --no-skill` (see Install above; the `! tin-can` line the hooks print needs `tin-can` on your shell's `PATH`). Then add the plugin, pinned to a release tag (recommended):
 
 ```
 /plugin marketplace add ek33450505/tin-can#v0.2.0
@@ -44,7 +44,7 @@ Install, pinned to a release tag (recommended):
 
 An unpinned `/plugin marketplace add ek33450505/tin-can` follows the default branch. Updates reach you only when the plugin's version changes, through `/plugin marketplace update tin-can` or auto-update if you enable it.
 
-The binary still comes from `./install.sh --no-skill` (the plugin provides the skill, and you don't want two copies).
+Use `--no-skill` because the plugin provides the skill, and you don't want two copies.
 
 Requires `jq` (without it the hooks silently do nothing). `TIN_CAN_HOOKS=0` disables the hooks.
 
@@ -63,7 +63,7 @@ tin-can path/to/handoff.md                # a specific file
 tin-can --latest                          # newest handoff in ~/.claude/resume-prompts, preferring this repo's
 tin-can --list                            # see which handoffs `--latest` would consider
 tin-can --agent codex handoff.md          # start Codex instead of Claude Code
-tin-can --where window handoff.md         # new window/workspace (cmux) or detached session (tmux) instead of a tab
+tin-can --where window handoff.md         # new window (cmux workspace, WezTerm/kitty window) or detached session (tmux, Zellij)
 tin-can --term print handoff.md           # just print the command to paste into a tab yourself
 tin-can --dry-run handoff.md              # show which file and what command, launch nothing
 ```
@@ -137,7 +137,7 @@ Other tools approach the same problem, mostly aimed at Claude Code and tmux:
 
 ## Changes
 
-- **0.2.0**: **behavior change:** tin-can now warns on stderr, and still launches, when the handoff is neither inside the directory the session will start in nor named for the repository (for example a `--latest` pick from `~/.claude/resume-prompts` that is named for another repo). `--list` shows the newest 10 handoffs that `--latest` would consider, marks the one it would pick (`*`, shown even when older) and those named for the repository (`+`), and counts files skipped by name or as unsafe; it exits 0 for a listing, including an empty one, and 2 when the search directory is missing or unsafe. New terminal backends, tested with stubs only: Zellij (a tab, or a detached session for `--where window`), WezTerm, and kitty (which needs remote control enabled). `--term auto` checks cmux, tmux, Zellij, WezTerm, kitty, then print, each by its environment variable and a binary on `PATH`. An optional Claude Code plugin bundles the skill with three hooks that run in every session, on every prompt, Write/Edit/MultiEdit and turn end (they need `jq`; `TIN_CAN_HOOKS=0` turns them off; the `tin-can` binary still comes from `install.sh`): when a handoff is written directly into the handoff directory they show `! tin-can '<path>'`; on a wrap-up phrase they ask for a handoff if work is unfinished; and at the end of that turn, if git shows uncommitted or unpushed work, the reply has no `! tin-can` line and no handoff was written, they ask once more, at most once per session. `install.sh --no-skill` links only the binary, and `install.sh` is now executable. `--help` lists the new terminals and `--list`, and says that `--dry-run` shows paths escaped.
+- **0.2.0**: **behavior change:** tin-can now warns on stderr, and still launches, when the handoff is neither inside the directory the session will start in nor named for the repository (for example a `--latest` pick from `~/.claude/resume-prompts` that is named for another repo). `--list` shows the newest 10 handoffs that `--latest` would consider, marks the one it would pick (`*`, shown even when older) and those named for the repository (`+`), and counts files skipped by name or as unsafe; it exits 0 for a listing, including an empty one, and 2 when the search directory is missing or unsafe. New terminal backends, tested with stubs only: Zellij (a tab, or a detached session for `--where window`), WezTerm, and kitty (which needs remote control enabled). `--term auto` checks cmux, tmux, Zellij, WezTerm, kitty, then print, each by its environment variable and a binary on `PATH`, so inside Zellij, WezTerm or kitty it now opens a tab where it used to print the command. An optional Claude Code plugin bundles the skill with three hooks that run in every session, on every prompt, Write/Edit/MultiEdit and turn end (they need `jq`; `TIN_CAN_HOOKS=0` turns them off; the `tin-can` binary still comes from `install.sh`): when a handoff is written directly into the handoff directory they surface `! tin-can '<path>'` to you and to the model; on a wrap-up phrase they ask for a handoff if work is unfinished; and at the end of that turn, if git shows uncommitted or unpushed work, the reply has no `! tin-can` line and no handoff was written, they ask once more, at most once per session. `install.sh --no-skill` links only the binary, and `install.sh` is now executable. `--help` lists the new terminals and `--list`, and says that `--dry-run` shows paths escaped.
 - **0.1.2**: **behavior changes:** some paths that used to work are now refused, and `--dry-run` prints paths in a different form (details below). `--latest` skips names ending in `-auto.md` (auto-generated resume scaffolds); an explicit `HANDOFF_FILE` with that ending is still accepted. Paths containing Unicode tag characters (U+E0000-U+E007F) or lookalike spaces (U+00A0, U+2000-U+200A, U+202F, U+205F, U+3000), which were accepted before, are now refused like the other disguising characters. A failed launch's error output is indented and shown with every byte other than printable ASCII, newline and tab replaced by `?`. `--dry-run` shows the directory, handoff and launch arguments escaped, so an ordinary path with a space now appears as `my\ project`; the `command:` line stays raw so it can be pasted, and a stderr note flags a command containing non-ASCII characters (also with `--term print` and after a failed launch). If bats itself runs on bash 3.2, every test now fails in setup with an explanation.
 - **0.1.1**: **breaking:** auto-selecting the newest handoff now needs `--latest`. A bare `tin-can`, or `tin-can --dry-run` without a file, exits 2 instead of guessing, and giving both a file and `--latest` also exits 2. The left-to-right, right-to-left and Arabic letter marks (U+200E, U+200F, U+061C) are refused in paths like the other bidi controls. Paths in tin-can's own error and warning messages, and in the `using` line, are shown shell-escaped (`printf %q`).
 - **0.1.0**: first version.
