@@ -1,0 +1,3 @@
+# tin-can
+
+@../AGENTS.md
