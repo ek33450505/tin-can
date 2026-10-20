@@ -39,7 +39,7 @@ Inside Claude Code, run it with the `!` prefix so it runs in your shell: `! tin-
 
 Options: `--agent`, `--term`, `--where`, `--cwd`, `--dir`, `--latest`, `--dry-run`, `--version`, `--help`. Option values must be non-empty and not start with `-`. Use `--` before a file name that starts with `-`. Environment defaults: `TIN_CAN_AGENT`, `TIN_CAN_TERM`, `TIN_CAN_DIR`.
 
-With `--latest` instead of a file, `tin-can` takes the newest `*.md` in the search directory, skips names starting with `superseded-` or `_`, and prefers files whose name contains the working directory's name as a whole word (`-`, `_` and `.` count as separators, so `cast` matches `2026-10-12-cast-next.md` but not `broadcast-plan.md`). It reports the choice on stderr. With neither a file nor `--latest` it exits 2 rather than guess; giving both is also an error. Exit codes: `0` ok, `1` launch failure (the paste-able command is printed as a fallback), `2` usage or handoff error. A path containing any of the following is refused with exit 2 when it is given explicitly (`--cwd`, `--dir`, an explicit `HANDOFF_FILE`), and the file is silently skipped when it is only an auto-selection candidate (the error says how many were skipped if nothing else qualifies): ASCII control characters (0x01-0x1F, including tab, newline, CR and ESC, and DEL 0x7F); C1 controls (U+0080-U+009F); Unicode line and paragraph separators (U+2028, U+2029); bidirectional embeddings and overrides (U+202A-U+202E); bidirectional isolates (U+2066-U+2069); or the left-to-right, right-to-left and Arabic letter marks (U+200E, U+200F, U+061C). Ordinary non-ASCII text (accents, CJK, emoji) is accepted. Files with equal modification times are taken in file-name order.
+With `--latest` instead of a file, `tin-can` takes the newest `*.md` in the search directory, skips names starting with `superseded-` or `_` and names ending in `-auto.md` (auto-generated resume scaffolds), and prefers files whose name contains the working directory's name as a whole word (`-`, `_` and `.` count as separators, so `cast` matches `2026-10-12-cast-next.md` but not `broadcast-plan.md`). It reports the choice on stderr. With neither a file nor `--latest` it exits 2 rather than guess; giving both is also an error. Exit codes: `0` ok, `1` launch failure (the paste-able command is printed as a fallback), `2` usage or handoff error. A path containing any of the following is refused with exit 2 when it is given explicitly (`--cwd`, `--dir`, an explicit `HANDOFF_FILE`), and the file is silently skipped when it is only an auto-selection candidate (the error says how many were skipped if nothing else qualifies): ASCII control characters (0x01-0x1F, including tab, newline, CR and ESC, and DEL 0x7F); C1 controls (U+0080-U+009F); Unicode line and paragraph separators (U+2028, U+2029); bidirectional embeddings and overrides (U+202A-U+202E); bidirectional isolates (U+2066-U+2069); the left-to-right, right-to-left and Arabic letter marks (U+200E, U+200F, U+061C); Unicode tag characters (U+E0000-U+E007F); or lookalike spaces (U+00A0, U+2000-U+200A, U+202F, U+205F, U+3000). Other non-ASCII text (letters with accents, CJK ideographs, emoji) is accepted. Files with equal modification times are taken in file-name order.
 
 The handoff file is an ordinary markdown file with a `## KICKOFF` section; see [docs/handoff-format.md](docs/handoff-format.md). The bundled Claude Code skill (`skills/tin-can`) and the [AGENTS.md](AGENTS.md) snippet teach an agent to write one and tell you the command to run.
 
@@ -63,6 +63,7 @@ The command run in the new terminal is `cd 'DIR' && exec 'AGENT' 'PROMPT'`, buil
 - The only text given to the new agent is `Read the handoff file at <absolute path> and follow its KICKOFF section.` as a single argument.
 - File contents are never interpolated into a shell command. The directory, agent name and prompt are each single-quoted, and paths with control characters are refused outright. The test suite round-trips paths containing spaces, quotes, `$`, backticks, glob and shell metacharacters, a leading `-`, and non-ASCII text (including under `LC_ALL=C`) through bash, zsh and dash.
 - **Whoever can write into the handoff directory steers the next session.** The new agent will read the chosen file and may act on it. `--latest` picks the newest file, or the newest whose name contains the repository name, so a file dropped into that directory can win. Mitigations in the tool: auto-selection refuses a directory that is group- or world-writable or not owned by you, and skips symlinks and files not owned by you; an explicit file that is a symlink, not yours, or inside a group- or world-writable directory prints a warning. There is no interactive confirmation, because `! tin-can` has no terminal to ask on.
+- `--dry-run` shows the directory, handoff and launch arguments escaped, and the `command:` line raw so it can be pasted. When that command, or the one printed by `--term print` or after a failed launch, contains non-ASCII characters, a note on stderr says so. A failed launch's error output is indented and shown with every byte other than printable ASCII, newline and tab replaced by `?`.
 - Read the handoff before launching it, especially one written by an agent: with `--latest`, run `tin-can --latest --dry-run` first to see which file would be used, then open it.
 
 ## Known limitations
@@ -76,10 +77,12 @@ The command run in the new terminal is `cd 'DIR' && exec 'AGENT' 'PROMPT'`, buil
 
 ```bash
 bats tests/              # needs bats-core; uses stub cmux/tmux/claude/codex and a temp HOME
-shellcheck bin/tin-can install.sh tests/helpers.bash
-TIN_CAN_TEST_BASH=/bin/bash bats tests/   # run the suite under macOS bash 3.2
-shfmt -d -i 2 -ci bin/tin-can install.sh tests/helpers.bash   # style: 2-space indent, indented case
+shellcheck bin/tin-can install.sh tests/helpers.bash tests/require_bash4.bash
+TIN_CAN_TEST_BASH=/bin/bash bats tests/   # run the script under test on macOS bash 3.2 (bats itself stays on bash >= 4)
+shfmt -d -i 2 -ci bin/tin-can install.sh tests/helpers.bash tests/require_bash4.bash   # style: 2-space indent, indented case
 ```
+
+bats itself must run on bash >= 4: under bash 3.2 every test fails in setup with an explanation, because bash 3.2 would make assertions vacuous. `TIN_CAN_TEST_BASH=/bin/bash` still covers the script under 3.2.
 
 The "not owned by you" checks need a file owned by another user, which needs root to create, so those paths are not covered by tests.
 
@@ -95,6 +98,7 @@ Other tools approach the same problem, mostly aimed at Claude Code and tmux:
 
 ## Changes
 
+- **0.1.2**: **behavior changes:** some paths that used to work are now refused, and `--dry-run` prints paths in a different form (details below). `--latest` skips names ending in `-auto.md` (auto-generated resume scaffolds); an explicit `HANDOFF_FILE` with that ending is still accepted. Paths containing Unicode tag characters (U+E0000-U+E007F) or lookalike spaces (U+00A0, U+2000-U+200A, U+202F, U+205F, U+3000), which were accepted before, are now refused like the other disguising characters. A failed launch's error output is indented and shown with every byte other than printable ASCII, newline and tab replaced by `?`. `--dry-run` shows the directory, handoff and launch arguments escaped, so an ordinary path with a space now appears as `my\ project`; the `command:` line stays raw so it can be pasted, and a stderr note flags a command containing non-ASCII characters (also with `--term print` and after a failed launch). If bats itself runs on bash 3.2, every test now fails in setup with an explanation.
 - **0.1.1**: **breaking:** auto-selecting the newest handoff now needs `--latest`. A bare `tin-can`, or `tin-can --dry-run` without a file, exits 2 instead of guessing, and giving both a file and `--latest` also exits 2. The left-to-right, right-to-left and Arabic letter marks (U+200E, U+200F, U+061C) are refused in paths like the other bidi controls. Paths in tin-can's own error and warning messages, and in the `using` line, are shown shell-escaped (`printf %q`).
 - **0.1.0**: first version.
 

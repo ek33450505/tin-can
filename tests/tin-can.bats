@@ -377,6 +377,43 @@ load helpers
   [[ "$output" == *"tin-can: using $RESUME/real.md"* ]]
 }
 
+@test "handoff: *-auto.md is excluded even when newest and repo-named" {
+  printf 'n\n' >"$RESUME/2026-01-01-myrepo-next.md"
+  printf 'a\n' >"$RESUME/2026-01-02-myrepo-auto.md"
+  set_mtime "$RESUME/2026-01-01-myrepo-next.md" 202601010000
+  set_mtime "$RESUME/2026-01-02-myrepo-auto.md" 202601020000
+  run_tc --latest --cwd "$WORK" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"tin-can: using $RESUME/2026-01-01-myrepo-next.md"* ]]
+}
+
+@test "handoff: only *-auto.md files present exits 2" {
+  printf 'a\n' >"$RESUME/2026-01-02-myrepo-auto.md"
+  run_tc --latest --cwd "$TEST_ROOT" --term print
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"no handoff file found"* ]]
+}
+
+@test "handoff: near-miss auto names stay eligible" {
+  local n
+  for n in autopilot.md my-auto-notes.md auto.md; do
+    rm -f "$RESUME"/*.md
+    printf 'o\n' >"$RESUME/old.md"
+    printf 'n\n' >"$RESUME/$n"
+    set_mtime "$RESUME/old.md" 202601010000
+    set_mtime "$RESUME/$n" 202601020000
+    run_tc --latest --cwd "$TEST_ROOT" --term print
+    [ "$status" -eq 0 ] || return 1
+    [[ "$output" == *"tin-can: using $RESUME/$n"* ]] || return 1
+  done
+}
+
+@test "handoff: explicit x-auto.md file is still accepted" {
+  printf 'a\n' >"$RESUME/x-auto.md"
+  run_tc "$RESUME/x-auto.md" --cwd "$TEST_ROOT" --term print
+  [ "$status" -eq 0 ]
+}
+
 @test "handoff: only excluded files present exits 2" {
   printf 's\n' >"$RESUME/superseded-x.md"
   printf 't\n' >"$RESUME/_TEMPLATE.md"
@@ -618,6 +655,26 @@ load helpers
   run_tc --latest --cwd "$TEST_ROOT" --term print
   [ "$status" -eq 0 ]
   [[ "$output" == *"tin-can: using $RESUME/older.md"* ]]
+}
+
+@test "trust: a candidate whose name has a no-break space is skipped even when newest" {
+  printf 'old\n' >"$RESUME/older.md"
+  printf 'x\n' >"$RESUME/$(printf 'new\302\240x').md"
+  set_mtime "$RESUME/older.md" 202601010000
+  set_mtime "$RESUME/$(printf 'new\302\240x').md" 202601050000
+  run_tc --latest --cwd "$TEST_ROOT" --term print
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"tin-can: using $RESUME/older.md"* ]]
+}
+
+@test "lookalike spaces and tag characters are refused as 'control' errors" {
+  local n
+  for n in "$(printf 'x\342\200\201y')" "$(printf 'x\343\200\200y')" \
+    "$(printf 'x\363\240\201\224y')"; do
+    run_tc --term print --cwd "$TEST_ROOT/no-such/$n" "$HF"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"control character"* ]]
+  done
 }
 
 @test "trust: an explicit symlink handoff is allowed but warns" {
@@ -956,10 +1013,11 @@ find_dash() {
 }
 
 @test "unicode controls: ordinary non-ASCII near the refused ranges is accepted" {
-  # U+00A0 (C2 A0), U+00C1 (C3 81), U+202F (E2 80 AF), U+2064 (E2 81 A4),
-  # U+206A (E2 81 AA), emoji (F0 9F 98 80)
-  roundtrip "$(printf 'nb\302\240sp')" "$(printf 'c\303\201.md')"
-  roundtrip "$(printf 'nn\342\200\257sp')" "$(printf 'u\342\201\244.md')"
+  # U+00A1 (C2 A1), U+00C1 (C3 81), U+2030 (E2 80 B0), U+2064 (E2 81 A4),
+  # U+2060 (E2 81 A0), U+206A (E2 81 AA), emoji (F0 9F 98 80)
+  roundtrip "$(printf 'nb\302\241sp')" "$(printf 'c\303\201.md')"
+  roundtrip "$(printf 'nn\342\200\260sp')" "$(printf 'u\342\201\244.md')"
+  roundtrip "$(printf 'wj\342\201\240sp')" "$(printf 'z\342\200\215w.md')"
   roundtrip "$(printf 'e\342\201\252x')" "$(printf 'smile \360\237\230\200.md')"
 }
 
@@ -969,8 +1027,10 @@ find_dash() {
   # Each input is paired with its octal rendering: the error must name THIS
   # input, escaped (UTF-8 locale, so bash 3.2's locale path is exercised).
   local oct raw
-  for oct in '\342\200\247' '\342\200\257' '\342\201\245' '\342\201\252' \
-    '\302\240' '\303\201' '\342\200\215' '\342\200\220' '\330\233' '\330\235'; do
+  for oct in '\342\200\247' '\342\201\245' '\342\201\252' \
+    '\302\241' '\303\201' '\342\200\215' '\342\200\220' '\330\233' '\330\235' \
+    '\341\277\277' '\342\200\213' '\342\200\260' '\342\201\236' '\342\201\240' \
+    '\342\277\277' '\343\200\201' '\363\237\277\277' '\363\240\202\200'; do
     # shellcheck disable=SC2059
     raw="$(printf "$oct")"
     run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term print --cwd "$TEST_ROOT/no-such/a${raw}b" "$HF"
@@ -988,7 +1048,10 @@ find_dash() {
   for n in "$(printf '\302\200')" "$(printf '\302\237')" \
     "$(printf '\342\200\250')" "$(printf '\342\200\256')" \
     "$(printf '\342\201\246')" "$(printf '\342\201\251')" \
-    "$(printf '\342\200\216')" "$(printf '\342\200\217')" "$(printf '\330\234')"; do
+    "$(printf '\342\200\216')" "$(printf '\342\200\217')" "$(printf '\330\234')" \
+    "$(printf '\302\240')" "$(printf '\342\200\200')" "$(printf '\342\200\212')" \
+    "$(printf '\342\200\257')" "$(printf '\342\201\237')" "$(printf '\343\200\200')" \
+    "$(printf '\363\240\200\200')" "$(printf '\363\240\201\277')"; do
     run_tc --term print --cwd "$TEST_ROOT/no-such/a${n}b" "$HF"
     [ "$status" -eq 2 ]
     [[ "$output" == *"control character"* ]]
@@ -1132,4 +1195,63 @@ raw_path_sites() {
   run grep -c 'using %s.*"\$(shown "\$handoff")"' "$TC"
   [ "$status" -eq 0 ]
   [ "$output" = "1" ]
+}
+
+# A failed launcher's stderr is untrusted: non-printable bytes become '?'.
+@test "failure: launcher stderr with ESC, C1 and RLO is sanitized (UTF-8 locale)" {
+  printf '%s\n' '#!/bin/sh' \
+    "printf 'plain-text \\033[31m \\302\\233 \\342\\200\\256 end\\n' >&2" \
+    "printf 'tin-can: launched claude in a new cmux tab\\n' >&2" \
+    'exit 3' >"$STUBS/cmux"
+  run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "$TC_BASH" "$TC" --term cmux --cwd "$WORK" "$HF"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"cmux failed (exit 3)"* ]] || return 1
+  [[ "$output" == *"plain-text"* ]] || return 1
+  [[ "$output" == *"  tin-can: launched claude in a new cmux tab"* ]] || return 1
+  local l
+  for l in "${lines[@]}"; do
+    [[ "$l" != "tin-can: launched"* ]] || return 1
+  done
+  [[ "$output" == *"?[31m"* ]] || return 1
+  [[ "$output" != *$'\033'* ]] || return 1
+  [[ "$output" != *$'\xc2\x9b'* ]] || return 1
+  [[ "$output" != *$'\xe2\x80\xae'* ]] || return 1
+  [[ "$output" == *"paste this into a new terminal tab"* ]] || return 1
+  [[ "$output" == *"exec 'claude' "* ]] || return 1
+}
+
+@test "dry-run: non-ASCII cwd is escaped, command stays raw, note on stderr (UTF-8 locale)" {
+  local z; z="$(printf '\342\200\213')"
+  mkdir -p "$TEST_ROOT/work/a${z}b"
+  run env "PATH=$TC_PATH" "LANG=en_US.UTF-8" "LC_ALL=" "CMUX_WORKSPACE_ID=ws-1" "$TC_BASH" "$TC" --term cmux --where window --dry-run --cwd "$TEST_ROOT/work/a${z}b" "$HF"
+  [ "$status" -eq 0 ]
+  local cwdline launchline cmdline
+  cwdline="$(printf '%s\n' "$output" | grep '^  cwd:')"
+  launchline="$(printf '%s\n' "$output" | grep '^  launch:')"
+  cmdline="$(printf '%s\n' "$output" | grep '^  command:')"
+  [[ "$cwdline" == *'\342\200\213'* ]] || return 1
+  [[ "$cwdline" != *"$z"* ]] || return 1
+  [[ "$launchline" == *"--cwd"* ]] || return 1
+  [[ "$launchline" != *"$z"* ]] || return 1
+  [[ "$cmdline" == *"$z"* ]] || return 1
+  [[ "$output" == *"note: the command contains non-ASCII characters"* ]] || return 1
+}
+
+@test "print: non-ASCII cwd notes on stderr, stdout is exactly the command" {
+  local z out err; z="$(printf '\342\200\213')"
+  mkdir -p "$TEST_ROOT/work/a${z}b"
+  out="$(env "PATH=$TC_PATH" "$TC_BASH" "$TC" --term print --cwd "$TEST_ROOT/work/a${z}b" "$HF" 2>"$TEST_ROOT/err")"
+  err="$(cat "$TEST_ROOT/err")"
+  [[ "$err" == *"note: the command contains non-ASCII characters"* ]] || return 1
+  [[ "$out" == "cd "* || "$out" == *"exec 'claude' "* ]] || return 1
+  [[ "$out" != *"note:"* ]] || return 1
+  [ "$out" = "$(tc_cmd --cwd "$TEST_ROOT/work/a${z}b" "$HF")" ]
+}
+
+@test "dry-run: ASCII-only paths print no non-ASCII note" {
+  run_tc --term print --dry-run --cwd "$WORK" "$HF"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"non-ASCII"* ]] || return 1
+  run_tc --term print --cwd "$WORK" "$HF"
+  [[ "$output" != *"non-ASCII"* ]] || return 1
 }
