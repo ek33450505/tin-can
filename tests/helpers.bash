@@ -34,6 +34,9 @@ make_stubs() {
 }
 
 setup() {
+  # shellcheck source=/dev/null
+  source "$BATS_TEST_DIRNAME/require_bash4.bash"
+  require_bash4 || return 1
   TEST_ROOT="$(mktemp -d "${BATS_TMPDIR:-/tmp}/tin-can.XXXXXX")"
   TEST_ROOT="$(cd -P "$TEST_ROOT" && pwd -P)"
   export HOME="$TEST_ROOT/home"

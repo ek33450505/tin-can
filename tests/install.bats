@@ -1,6 +1,9 @@
 #!/usr/bin/env bats
 
+load require_bash4
+
 setup() {
+  require_bash4 || return 1
   TEST_ROOT="$(mktemp -d "${BATS_TMPDIR:-/tmp}/tin-can-inst.XXXXXX")"
   TEST_ROOT="$(cd -P "$TEST_ROOT" && pwd -P)"
   export HOME="$TEST_ROOT/home"

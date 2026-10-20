@@ -77,10 +77,12 @@ The command run in the new terminal is `cd 'DIR' && exec 'AGENT' 'PROMPT'`, buil
 
 ```bash
 bats tests/              # needs bats-core; uses stub cmux/tmux/claude/codex and a temp HOME
-shellcheck bin/tin-can install.sh tests/helpers.bash
-TIN_CAN_TEST_BASH=/bin/bash bats tests/   # run the suite under macOS bash 3.2
-shfmt -d -i 2 -ci bin/tin-can install.sh tests/helpers.bash   # style: 2-space indent, indented case
+shellcheck bin/tin-can install.sh tests/helpers.bash tests/require_bash4.bash
+TIN_CAN_TEST_BASH=/bin/bash bats tests/   # run the script under test on macOS bash 3.2 (bats itself stays on bash >= 4)
+shfmt -d -i 2 -ci bin/tin-can install.sh tests/helpers.bash tests/require_bash4.bash   # style: 2-space indent, indented case
 ```
+
+bats itself must run on bash >= 4: under bash 3.2 every test fails in setup with an explanation, because bash 3.2 would make assertions vacuous. `TIN_CAN_TEST_BASH=/bin/bash` still covers the script under 3.2.
 
 The "not owned by you" checks need a file owned by another user, which needs root to create, so those paths are not covered by tests.
 
