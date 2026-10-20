@@ -4,6 +4,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 ## [Unreleased]
 
+### Added
+- Homebrew tap: `brew install ek33450505/tin-can/tin-can` ([ek33450505/homebrew-tin-can](https://github.com/ek33450505/homebrew-tin-can)).
+
 ## [0.2.1] — 2026-10-20
 
 ### Changed
