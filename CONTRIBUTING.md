@@ -42,7 +42,7 @@ Read the TAP output: the plan line (`1..N`) and any `not ok` line. The exit stat
 
 ## PR Checklist
 
-CI runs shellcheck and the bats suite on Ubuntu. A macOS job runs the suite under the system `/bin/bash` 3.2, but not on every event (see `.github/workflows/ci.yml`), so run `TIN_CAN_TEST_BASH=/bin/bash bats tests/` and the other checks locally before you open a pull request.
+CI runs shellcheck and the bats suite on Ubuntu, and the suite again on macOS under the system `/bin/bash` 3.2 (see `.github/workflows/ci.yml`). Run `TIN_CAN_TEST_BASH=/bin/bash bats tests/` and the other checks locally before you open a pull request.
 
 - [ ] `bats tests/` passes on bash 4 or later, with the TAP counts read.
 - [ ] `TIN_CAN_TEST_BASH=/bin/bash bats tests/` passes.
@@ -53,6 +53,7 @@ CI runs shellcheck and the bats suite on Ubuntu. A macOS job runs the suite unde
 - [ ] `bin/tin-can --help | awk 'length > 80'` prints nothing.
 - [ ] Each new test fails when the code it covers is broken (mutation check).
 - [ ] `VERSION` and `.claude-plugin/plugin.json` are bumped together, and the README's pinned tag (`/plugin marketplace add ek33450505/tin-can#vX.Y.Z`) is updated, if this is a release.
+- [ ] Once the release is published, the Homebrew tap's `Formula/tin-can.rb` ([ek33450505/homebrew-tin-can](https://github.com/ek33450505/homebrew-tin-can)) is bumped: `url` points at the new tag's archive and `sha256` matches it (`curl -sL <url> | shasum -a 256`), if this is a release.
 - [ ] `CHANGELOG.md` has an entry under `## [Unreleased]`, if the change is user-visible.
 
 ## Code Style
