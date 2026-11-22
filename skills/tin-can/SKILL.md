@@ -9,7 +9,15 @@ Use this when the user asks to hand off, continue in a new session, or "tin-can"
 
 ## Step 1: write the handoff file
 
-Write a markdown file with these sections:
+Start the file with a YAML frontmatter block whose `repo:` is the repository directory name, exactly (the same name used in the file name below), so tools that load handoffs per repository can match it without guessing from the file name:
+
+```markdown
+---
+repo: widget-service
+---
+```
+
+Then write these sections:
 
 - `## KICKOFF` (required): what the fresh session should do first, written as instructions to the reader. It must make sense on its own and name which other sections to read before acting. The launcher's prompt is only "Read the handoff file at <path> and follow its KICKOFF section."
 - `## State`: branch, what is done, what is in flight, uncommitted changes. Facts, not narrative.
@@ -20,6 +28,9 @@ Write a markdown file with these sections:
 Example:
 
 ```markdown
+---
+repo: widget-service
+---
 # Handoff: widget-service retry logic
 
 ## KICKOFF
